@@ -1,0 +1,1075 @@
+/* ==========================================================================
+   moji: editor interface (0.0.1)
+   ========================================================================== */
+
+
+/* 1. design tokens
+   ========================================================================== */
+
+:root {
+  /* colors: workspace and canvas */
+  --color-workspace: #D8DADC;
+  --color-grid-primary: #C5C8CB;
+  --color-grid-secondary: #D0D2D4;
+  --color-canvas: #FFFFFF;
+
+  /* colors: interface */
+  --color-ink: #1D1D1F;
+  --color-ink-muted: #6E6E73;
+  --color-ink-faint: rgba(29, 29, 31, 0.32);
+  --color-on-ink: #FFFFFF;
+  --color-fill-subtle: rgba(29, 29, 31, 0.05);
+  --color-fill: rgba(29, 29, 31, 0.08);
+  --color-fill-pressed: rgba(29, 29, 31, 0.13);
+  --color-separator: rgba(29, 29, 31, 0.08);
+  --color-focus: #0071E3;
+
+  /* glass material */
+  --glass-fill: rgba(250, 250, 252, 0.7);
+  --glass-fill-strong: rgba(250, 250, 252, 0.8);
+  --glass-fill-solid: #F5F5F7;
+  --glass-blur: 22px;
+  --glass-saturate: 180%;
+  --glass-edge: 0 0 0 0.5px rgba(29, 29, 31, 0.1);
+  --glass-highlight: inset 0 0.5px 0 rgba(255, 255, 255, 0.95), inset 0 0 0 0.5px rgba(255, 255, 255, 0.5);
+  --shadow-float: 0 1px 2px rgba(15, 20, 25, 0.05), 0 6px 20px rgba(15, 20, 25, 0.08);
+  --shadow-panel: 0 2px 6px rgba(15, 20, 25, 0.05), 0 20px 50px rgba(15, 20, 25, 0.14);
+
+  /* grid (initial values; js keeps the grid aligned with the view) */
+  --grid-size: 40px;
+  --grid-major-size: calc(var(--grid-size) * 5);
+  --grid-line: 1px;
+
+  /* spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* safe areas */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* edge offset for floating controls */
+  --edge-offset: var(--space-3);
+
+  /* control dimensions */
+  --control-size: 48px;          /* height of every floating control */
+  --tool-size: 44px;             /* touch target of each tool */
+  --tools-anchor-width: 60px;    /* chevron + 🛠️ */
+  --tools-count: 6;
+  --tools-expanded-width: calc(var(--tools-anchor-width) + var(--tools-count) * var(--tool-size) + var(--space-1));
+  --icon-size: 22px;
+  --icon-size-small: 14px;
+  --icon-stroke: 2;
+  --label-height: 30px;
+  --timeline-height: 44px;
+  --timeline-width: min(232px, calc(100vw - 2 * var(--edge-offset) - 2 * var(--control-size) - 2 * var(--space-5)));
+
+  /* sheets */
+  --sheet-height-compact: max(250px, 35vh);
+  --sheet-height-expanded: calc(100vh - var(--safe-top) - var(--safe-bottom) - 2 * var(--edge-offset) - var(--control-size) - var(--space-3));
+
+  /* radii */
+  --radius-capsule: 999px;
+  --radius-panel: 26px;
+  --radius-inner: 14px;
+  --radius-small: 10px;
+
+  /* motion */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-morph: 340ms;
+  --duration-fade: 180ms;
+  --duration-sheet: 380ms;
+  --duration-press: 120ms;
+  --stagger: 22ms;
+
+  /* z-index */
+  --z-workspace: 0;
+  --z-stage: 1;
+  --z-controls: 10;
+  --z-panel: 20;
+}
+
+@supports (height: 1dvh) {
+  :root {
+    --sheet-height-compact: max(250px, 35dvh);
+    --sheet-height-expanded: calc(100dvh - var(--safe-top) - var(--safe-bottom) - 2 * var(--edge-offset) - var(--control-size) - var(--space-3));
+  }
+}
+
+
+/* 2. typography
+   ========================================================================== */
+
+:root {
+  --font-family: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+
+  --font-size-small: 0.875rem;  /* 14px */
+  --font-size-base: 1rem;       /* 16px */
+  --font-size-large: 1.125rem;  /* 18px */
+
+  --font-weight-regular: 400;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.2;
+  --line-height-base: 1.45;
+
+  --letter-spacing-base: 0.005em;
+  --letter-spacing-label: 0.02em;
+}
+
+
+/* 3. resets and global styles
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-base);
+  letter-spacing: var(--letter-spacing-base);
+  color: var(--color-ink);
+  background: var(--color-workspace);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+  margin: 0;
+}
+
+button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+svg {
+  display: block;
+}
+
+
+/* 4. application layout
+   ========================================================================== */
+
+.workspace,
+.stage,
+.controls {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+}
+
+
+/* 5. workspace and canvas
+   ========================================================================== */
+
+/* workspace: the area surrounding the canvas */
+.workspace {
+  z-index: var(--z-workspace);
+  overflow: hidden;
+  background-color: var(--color-workspace);
+  background-image:
+    linear-gradient(to right, var(--color-grid-primary) var(--grid-line), transparent var(--grid-line)),
+    linear-gradient(to bottom, var(--color-grid-primary) var(--grid-line), transparent var(--grid-line)),
+    linear-gradient(to right, var(--color-grid-secondary) var(--grid-line), transparent var(--grid-line)),
+    linear-gradient(to bottom, var(--color-grid-secondary) var(--grid-line), transparent var(--grid-line));
+  background-size:
+    var(--grid-major-size) var(--grid-major-size),
+    var(--grid-major-size) var(--grid-major-size),
+    var(--grid-size) var(--grid-size),
+    var(--grid-size) var(--grid-size);
+}
+
+/* stage: draws the white canvas and all emoji objects above the grid */
+.stage {
+  z-index: var(--z-stage);
+  display: block;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  cursor: default;
+}
+
+body[data-mode="place"] .stage,
+body[data-mode="delete"] .stage {
+  cursor: crosshair;
+}
+
+
+/* 6. glass material and shared controls
+   ========================================================================== */
+
+.controls {
+  z-index: var(--z-controls);
+  pointer-events: none; /* the layer itself never blocks the canvas */
+}
+
+.control-bar {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+.control-bar > * {
+  pointer-events: auto;
+}
+
+/* translucent material: hairline edge and top highlight instead of borders */
+.glass {
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-highlight), var(--glass-edge), var(--shadow-float);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.control-button,
+.timeline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--control-size);
+  padding: 0 var(--space-3);
+  color: var(--color-ink);
+  cursor: default; /* not yet functional */
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* borderless emoji button used inside glass containers */
+.tool-button {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: var(--tool-size);
+  height: var(--tool-size);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    background-color var(--duration-fade) ease,
+    opacity var(--duration-fade) ease,
+    transform var(--duration-press) var(--ease-out);
+}
+
+.tool-button:active {
+  transform: scale(0.9);
+  background: var(--color-fill);
+}
+
+.tool-button[aria-pressed="true"] {
+  background: var(--color-fill-pressed);
+}
+
+.tool-button[aria-disabled="true"] {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.tool-button[aria-disabled="true"]:active {
+  transform: none;
+  background: transparent;
+}
+
+@media (hover: hover) {
+  .tool-button:not([aria-disabled="true"]):hover {
+    background: var(--color-fill-subtle);
+  }
+
+  .tool-button[aria-pressed="true"]:hover {
+    background: var(--color-fill-pressed);
+  }
+}
+
+.icon {
+  flex: none;
+  width: var(--icon-size);
+  height: var(--icon-size);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.emoji-icon {
+  flex: none;
+  display: block;
+  width: var(--icon-size);
+  font-family: var(--font-family-emoji);
+  font-size: var(--icon-size);
+  line-height: 1;
+  text-align: center;
+}
+
+.icon--chevron {
+  width: var(--icon-size-small);
+  height: var(--icon-size-small);
+  color: var(--color-ink-muted);
+}
+
+
+/* 7. settings control (upper left, expands toward the right)
+   ========================================================================== */
+
+.control-bar--settings {
+  top: calc(var(--safe-top) + var(--edge-offset));
+  left: calc(var(--safe-left) + var(--edge-offset));
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
+}
+
+.control-button--settings {
+  padding: 0 10px 0 13px;
+}
+
+/* on narrow screens the expanded tools need this corner; settings steps aside */
+body[data-tools-cover="true"] .control-bar--settings {
+  opacity: 0;
+  transform: scale(0.88);
+  pointer-events: none;
+}
+
+body[data-tools-cover="true"] .control-bar--settings > * {
+  pointer-events: none;
+}
+
+
+/* 8. tools control (upper right, expands toward the left)
+   ========================================================================== */
+
+.control-bar--tools {
+  top: calc(var(--safe-top) + var(--edge-offset));
+  right: calc(var(--safe-right) + var(--edge-offset));
+}
+
+/* the glass capsule morphs between its collapsed and expanded widths */
+.tools {
+  position: relative;
+  width: var(--tools-anchor-width);
+  height: var(--control-size);
+  overflow: hidden;
+  transition: width var(--duration-morph) var(--ease-spring);
+}
+
+.tools[data-expanded="true"] {
+  width: var(--tools-expanded-width);
+}
+
+/* the anchor (chevron + 🛠️) is pinned to the right edge and never moves */
+.tools__anchor {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--tools-anchor-width);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 4px 0 0;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.tools__anchor .emoji-icon {
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+.tools__anchor:active .emoji-icon {
+  transform: scale(0.9);
+}
+
+/* chevron points left when the panel can expand, right when it can collapse */
+.tools__chevron {
+  transition: transform var(--duration-morph) var(--ease-spring);
+}
+
+.tools[data-expanded="true"] .tools__chevron {
+  transform: rotate(180deg);
+}
+
+.tools__row {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--tools-anchor-width);
+  display: flex;
+  align-items: center;
+  padding-left: var(--space-1);
+}
+
+/* tools fade and slide in, nearest to the anchor first */
+.tools__row .tool-button {
+  opacity: 0;
+  transform: translateX(10px) scale(0.92);
+  transition:
+    opacity var(--duration-fade) ease,
+    transform var(--duration-morph) var(--ease-spring),
+    background-color var(--duration-fade) ease;
+}
+
+.tools[data-expanded="true"] .tools__row .tool-button {
+  opacity: 1;
+  transform: none;
+  transition-delay: calc(var(--i, 0) * var(--stagger) + 40ms);
+}
+
+.tools[data-expanded="true"] .tools__row .tool-button[aria-disabled="true"] {
+  opacity: 0.3;
+}
+
+.tools[data-expanded="true"] .tools__row .tool-button:active {
+  transform: scale(0.9);
+  transition-delay: 0ms;
+}
+
+.tools[data-expanded="true"] .tools__row .tool-button[aria-disabled="true"]:active {
+  transform: none;
+}
+
+
+/* 9. timeline control (bottom center)
+   ========================================================================== */
+
+.control-bar--timeline {
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + var(--edge-offset));
+  transform: translateX(-50%);
+}
+
+.timeline {
+  width: var(--timeline-width);
+  height: var(--timeline-height);
+  gap: var(--space-3);
+  padding: 0 var(--space-4) 0 var(--space-3);
+  color: var(--color-ink-muted);
+}
+
+.timeline .emoji-icon {
+  font-size: 20px;
+}
+
+.timeline__track {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: var(--radius-capsule);
+  background: var(--color-fill-pressed);
+}
+
+
+/* 10. canvas label and canvas properties
+   ========================================================================== */
+
+/* positioned by js at the canvas's upper-left edge, in screen space */
+.canvas-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: var(--label-height);
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+  line-height: 1;
+  color: var(--color-ink);
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  white-space: nowrap;
+  will-change: transform;
+  transition: background-color var(--duration-fade) ease;
+}
+
+/* extend the touch target without enlarging the label */
+.canvas-label::after {
+  content: "";
+  position: absolute;
+  inset: -7px -4px;
+}
+
+.canvas-label[aria-expanded="true"] {
+  background: var(--glass-fill-strong);
+}
+
+.panel {
+  position: fixed;
+  z-index: var(--z-panel);
+  border-radius: var(--radius-panel);
+  background: var(--glass-fill-strong);
+  box-shadow: var(--glass-highlight), var(--glass-edge), var(--shadow-panel);
+}
+
+.canvas-panel {
+  top: 0;
+  left: 0;
+  width: min(300px, calc(100vw - 2 * var(--edge-offset)));
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+  border-radius: 22px;
+  opacity: 0;
+  transform: translateY(-6px) scale(0.97);
+  transform-origin: top left;
+  transition:
+    opacity var(--duration-fade) ease,
+    transform var(--duration-morph) var(--ease-spring);
+}
+
+.canvas-panel.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+/* segmented control for aspect ratio presets */
+.segmented {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding: 3px;
+  border-radius: 16px;
+  background: var(--color-fill-subtle);
+}
+
+.segmented__item {
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  font-size: var(--font-size-small);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color var(--duration-fade) ease, color var(--duration-fade) ease, box-shadow var(--duration-fade) ease;
+}
+
+.segmented__item[aria-pressed="true"] {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-weight: var(--font-weight-bold);
+  box-shadow: 0 1px 3px rgba(15, 20, 25, 0.1), 0 0 0 0.5px rgba(29, 29, 31, 0.06);
+}
+
+.canvas-panel__size {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 0 0 3px;
+}
+
+.dimension {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 0 0 0 12px;
+  border-radius: var(--radius-inner);
+  background: var(--color-fill-subtle);
+  cursor: text;
+  transition: box-shadow var(--duration-fade) ease;
+}
+
+.dimension:focus-within {
+  box-shadow: inset 0 0 0 1.5px var(--color-focus);
+}
+
+.dimension__label {
+  flex: none;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-ink-faint);
+}
+
+.dimension__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0 8px 0 6px;
+  border: 0;
+  background: transparent;
+  font-size: var(--font-size-base); /* 16px prevents ios zoom on focus */
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.dimension__input::-webkit-outer-spin-button,
+.dimension__input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.dimension__input:focus-visible {
+  outline: none;
+}
+
+.canvas-panel__times {
+  flex: none;
+  color: var(--color-ink-faint);
+}
+
+.apply-button {
+  flex: none;
+  height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: var(--color-ink);
+  color: var(--color-on-ink);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform var(--duration-press) var(--ease-out);
+}
+
+.apply-button:active {
+  transform: scale(0.95);
+}
+
+
+/* 11. mode bar and toast
+   ========================================================================== */
+
+.control-bar--mode {
+  right: calc(var(--safe-right) + var(--edge-offset));
+  bottom: calc(var(--safe-bottom) + var(--edge-offset) + var(--timeline-height) + var(--space-3));
+}
+
+.mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  animation: rise-in var(--duration-morph) var(--ease-spring);
+}
+
+body[data-mode="delete"] .mode-bar__add {
+  display: none;
+}
+
+/* keep the mode bar out of the way while the picker is open */
+body[data-panel="picker"] .control-bar--mode {
+  visibility: hidden;
+}
+
+.control-bar--toast {
+  left: 50%;
+  bottom: calc(var(--safe-bottom) + var(--edge-offset) + var(--timeline-height) + var(--space-3));
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100vw - 2 * var(--edge-offset));
+}
+
+.toast {
+  padding: 10px 16px;
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-tight);
+  text-align: center;
+  color: var(--color-ink);
+  background: var(--glass-fill-strong);
+  opacity: 0;
+  transform: translateY(8px) scale(0.97);
+  transition:
+    opacity var(--duration-fade) ease,
+    transform var(--duration-morph) var(--ease-spring);
+  pointer-events: none;
+}
+
+.toast.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+}
+
+
+/* 12. emoji picker
+   ========================================================================== */
+
+.picker {
+  left: calc(var(--safe-left) + var(--space-2));
+  right: calc(var(--safe-right) + var(--space-2));
+  bottom: calc(var(--safe-bottom) + var(--space-2));
+  max-width: 560px;
+  margin: 0 auto;
+  height: var(--sheet-height-compact);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 30px;
+  transform: translateY(calc(100% + var(--safe-bottom) + 24px));
+  transition:
+    transform var(--duration-sheet) var(--ease-spring),
+    height var(--duration-sheet) var(--ease-spring);
+}
+
+.picker.is-open {
+  transform: none;
+}
+
+.picker[data-size="expanded"] {
+  height: var(--sheet-height-expanded);
+}
+
+.picker:focus {
+  outline: none;
+}
+
+.picker__header {
+  flex: none;
+  display: grid;
+  padding: 0 var(--space-2) 6px;
+  touch-action: none;
+}
+
+.picker__grabber {
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: grab;
+  touch-action: none;
+}
+
+.picker__grabber span {
+  width: 36px;
+  height: 5px;
+  border-radius: var(--radius-capsule);
+  background: var(--color-ink-faint);
+  opacity: 0.6;
+}
+
+/* search and categories share one row so the grid keeps most of the space */
+.picker__bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.picker__search-field {
+  flex: 0 0 auto;
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 118px;
+  height: 40px;
+  border-radius: var(--radius-capsule);
+  background: var(--color-fill);
+  cursor: text;
+  transition: width var(--duration-morph) var(--ease-spring), box-shadow var(--duration-fade) ease;
+}
+
+.picker__search-field:focus-within {
+  width: 168px;
+  box-shadow: inset 0 0 0 1.5px var(--color-focus);
+}
+
+.picker__search-icon {
+  position: absolute;
+  left: 11px;
+  width: 16px;
+  height: 16px;
+  color: var(--color-ink-muted);
+  pointer-events: none;
+}
+
+.picker__search {
+  width: 100%;
+  height: 100%;
+  padding: 0 12px 0 33px;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: transparent;
+  font-size: var(--font-size-base); /* 16px prevents ios zoom on focus */
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+}
+
+.picker__search:focus-visible {
+  outline: none;
+}
+
+.picker__search::placeholder {
+  color: var(--color-ink-muted);
+}
+
+.picker__search::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+.picker__categories {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-x;
+  mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+}
+
+.picker__categories::-webkit-scrollbar {
+  display: none;
+}
+
+.picker__category {
+  width: 40px;
+  height: 40px;
+}
+
+.picker__category .emoji-icon {
+  font-size: 20px;
+  opacity: 0.55;
+  filter: saturate(0.6);
+  transition: opacity var(--duration-fade) ease, filter var(--duration-fade) ease;
+}
+
+.picker__category[aria-current="true"] {
+  background: var(--color-fill);
+}
+
+.picker__category[aria-current="true"] .emoji-icon {
+  opacity: 1;
+  filter: none;
+}
+
+.picker__grid {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
+  padding: 0 6px 10px;
+  border-top: 0.5px solid var(--color-separator);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-ink-faint) transparent;
+}
+
+.picker__section-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 10px 8px 4px;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+  color: var(--color-ink-muted);
+  background: linear-gradient(rgba(245, 245, 247, 0.96) 75%, rgba(245, 245, 247, 0));
+}
+
+.picker__items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));
+}
+
+.picker__emoji {
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-inner);
+  background: transparent;
+  font-family: var(--font-family-emoji);
+  font-size: 30px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: pan-y;
+  transition: transform var(--duration-press) var(--ease-out), background-color var(--duration-fade) ease;
+}
+
+.picker__emoji:active {
+  transform: scale(0.86);
+  background: var(--color-fill);
+}
+
+@media (hover: hover) {
+  .picker__emoji:hover {
+    background: var(--color-fill-subtle);
+  }
+}
+
+.picker__empty {
+  padding: var(--space-5) var(--space-2);
+  font-size: var(--font-size-small);
+  color: var(--color-ink-muted);
+  text-align: center;
+}
+
+
+/* 13. responsive adjustments
+   ========================================================================== */
+
+@media (min-width: 600px) {
+  :root {
+    --edge-offset: var(--space-4);
+    --timeline-width: 320px;
+  }
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --edge-offset: var(--space-5);
+    --timeline-width: 360px;
+  }
+}
+
+
+/* 14. accessibility and browser fallbacks
+   ========================================================================== */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+button:focus,
+a:focus,
+input:focus {
+  outline: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.tools__anchor:focus-visible,
+.tools__row .tool-button:focus-visible,
+.mode-bar .tool-button:focus-visible {
+  outline-offset: -2px;
+}
+
+/* no backdrop filtering: use an opaque surface */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass,
+  .panel {
+    background: var(--glass-fill-solid);
+  }
+}
+
+/* users who prefer reduced transparency */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .panel {
+    background: var(--glass-fill-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* users who prefer reduced motion: no movement, only quick fades */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-morph: 1ms;
+    --duration-sheet: 1ms;
+    --duration-press: 1ms;
+    --stagger: 0ms;
+  }
+
+  .tools__row .tool-button,
+  .canvas-panel,
+  .toast,
+  .picker {
+    transform: none !important;
+  }
+
+  .picker:not(.is-open) {
+    opacity: 0;
+  }
+
+  .mode-bar {
+    animation: none;
+  }
+}
+
+/* windows high contrast / forced colors */
+@media (forced-colors: active) {
+  .glass,
+  .panel {
+    border: 1px solid ButtonText;
+  }
+
+  .timeline__track {
+    background: ButtonText;
+  }
+}

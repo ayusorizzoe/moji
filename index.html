@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#D8DADC">
+  <title>moji</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="js/emoji-data.js" defer></script>
+  <script src="js/main.js" defer></script>
+</head>
+<body data-mode="idle">
+  <h1 class="visually-hidden">moji</h1>
+
+  <!-- workspace: the gray grid surrounding the canvas -->
+  <div class="workspace" aria-hidden="true"></div>
+
+  <!-- stage: renders the canvas and every emoji object from the document model -->
+  <canvas class="stage" aria-label="artwork canvas"></canvas>
+
+  <!-- floating controls -->
+  <div class="controls">
+
+    <!-- canvas label: follows the canvas, opens canvas properties -->
+    <button class="glass canvas-label" type="button" aria-haspopup="dialog"
+            aria-expanded="false" aria-controls="canvas-panel">canvas</button>
+
+    <div class="control-bar control-bar--settings">
+      <button class="glass control-button control-button--settings" type="button"
+              aria-label="settings" aria-disabled="true">
+        <span class="emoji-icon" aria-hidden="true">⚙️</span>
+        <svg class="icon icon--chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <polyline points="10 7 15 12 10 17"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="control-bar control-bar--tools">
+      <div class="glass tools" data-expanded="false">
+        <div class="tools__row" id="tools-row" inert>
+          <button class="tool-button" type="button" data-tool="add" aria-label="add emoji" style="--i: 5">
+            <span class="emoji-icon" aria-hidden="true">➕</span>
+          </button>
+          <button class="tool-button" type="button" data-tool="delete" aria-label="delete mode" aria-pressed="false" style="--i: 4">
+            <span class="emoji-icon" aria-hidden="true">➖</span>
+          </button>
+          <button class="tool-button" type="button" data-tool="undo" aria-label="undo" aria-disabled="true" style="--i: 3">
+            <span class="emoji-icon" aria-hidden="true">↩️</span>
+          </button>
+          <button class="tool-button" type="button" data-tool="redo" aria-label="redo" aria-disabled="true" style="--i: 2">
+            <span class="emoji-icon" aria-hidden="true">↪️</span>
+          </button>
+          <button class="tool-button" type="button" data-tool="recenter" aria-label="recenter canvas" style="--i: 1">
+            <span class="emoji-icon" aria-hidden="true">🎯</span>
+          </button>
+          <button class="tool-button" type="button" data-tool="export" aria-label="export png" style="--i: 0">
+            <span class="emoji-icon" aria-hidden="true">✅</span>
+          </button>
+        </div>
+        <button class="tools__anchor" type="button" aria-label="tools"
+                aria-expanded="false" aria-controls="tools-row">
+          <svg class="icon icon--chevron tools__chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <polyline points="14 7 9 12 14 17"/>
+          </svg>
+          <span class="emoji-icon" aria-hidden="true">🛠️</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="control-bar control-bar--timeline">
+      <button class="glass timeline" type="button"
+              aria-label="editing history timeline" aria-disabled="true">
+        <span class="emoji-icon" aria-hidden="true">⏳</span>
+        <span class="timeline__track" aria-hidden="true"></span>
+      </button>
+    </div>
+
+    <!-- mode bar: visible only while placing or deleting -->
+    <div class="control-bar control-bar--mode" hidden>
+      <div class="glass mode-bar">
+        <button class="tool-button mode-bar__add" type="button" data-action="reopen-picker" aria-label="choose another emoji">
+          <span class="emoji-icon" aria-hidden="true">➕</span>
+        </button>
+        <button class="tool-button" type="button" data-action="exit-mode" aria-label="exit placement mode">
+          <span class="emoji-icon" aria-hidden="true">✖️</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- transient status message (export or autosave problems only) -->
+    <div class="control-bar control-bar--toast">
+      <p class="glass toast" role="status" aria-live="polite" hidden></p>
+    </div>
+
+  </div>
+
+  <!-- canvas properties -->
+  <div class="glass panel canvas-panel" id="canvas-panel" role="dialog" aria-label="canvas properties" hidden>
+    <div class="segmented canvas-panel__ratios" role="group" aria-label="aspect ratio">
+      <button class="segmented__item" type="button" data-width="1080" data-height="1920">9:16</button>
+      <button class="segmented__item" type="button" data-width="1080" data-height="1350">4:5</button>
+      <button class="segmented__item" type="button" data-width="1080" data-height="1080">1:1</button>
+      <button class="segmented__item" type="button" data-width="1080" data-height="1440">3:4</button>
+      <button class="segmented__item" type="button" data-width="1920" data-height="1080">16:9</button>
+    </div>
+    <form class="canvas-panel__size" novalidate>
+      <label class="dimension">
+        <span class="dimension__label" aria-hidden="true">w</span>
+        <input class="dimension__input" type="number" name="width" inputmode="numeric"
+               min="64" max="4096" step="1" required aria-label="width in pixels">
+      </label>
+      <span class="canvas-panel__times" aria-hidden="true">×</span>
+      <label class="dimension">
+        <span class="dimension__label" aria-hidden="true">h</span>
+        <input class="dimension__input" type="number" name="height" inputmode="numeric"
+               min="64" max="4096" step="1" required aria-label="height in pixels">
+      </label>
+      <button class="apply-button" type="submit">apply</button>
+    </form>
+  </div>
+
+  <!-- emoji picker -->
+  <section class="glass panel picker" id="picker" aria-label="emoji picker" data-size="compact" tabindex="-1" hidden>
+    <div class="picker__header">
+      <button class="picker__grabber" type="button" aria-label="expand emoji picker"><span aria-hidden="true"></span></button>
+      <div class="picker__bar">
+        <label class="picker__search-field">
+          <svg class="icon picker__search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="11" cy="11" r="6"/>
+            <line x1="15.5" y1="15.5" x2="19.5" y2="19.5"/>
+          </svg>
+          <input class="picker__search" type="search" placeholder="search" aria-label="search emoji"
+                 autocomplete="off" autocapitalize="off" spellcheck="false">
+        </label>
+        <nav class="picker__categories" aria-label="emoji categories"></nav>
+      </div>
+    </div>
+    <div class="picker__grid"></div>
+  </section>
+</body>
+</html>
