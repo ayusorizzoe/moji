@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#D8DADC">
+  <!-- added to the home screen, moji opens full screen like an app -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="moji">
   <title>moji</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -27,9 +32,13 @@
   <!-- floating controls -->
   <div class="controls">
 
-    <!-- canvas label: follows the canvas, opens canvas properties -->
-    <button class="glass canvas-label" type="button" aria-haspopup="dialog"
-            aria-expanded="false" aria-controls="canvas-panel">canvas</button>
+    <!-- canvas label: follows the canvas; becomes a round button beside ⚙️
+         while the canvas fills the top of the screen -->
+    <button class="glass canvas-label" type="button" aria-label="canvas" aria-haspopup="dialog"
+            aria-expanded="false" aria-controls="canvas-panel">
+      <span class="canvas-label__text" aria-hidden="true">canvas</span>
+      <span class="canvas-label__icon" aria-hidden="true"></span>
+    </button>
 
     <div class="control-bar control-bar--settings">
       <button class="glass control-button control-button--settings" type="button"
@@ -64,17 +73,20 @@
       </div>
       <div class="tools" data-expanded="false">
         <div class="tools__row" id="tools-row" inert>
-          <button class="tool-button" type="button" data-tool="add" data-name="add" aria-label="add emoji" aria-pressed="false" style="--i: 5">
+          <button class="tool-button" type="button" data-tool="add" data-name="add" aria-label="add emoji" aria-pressed="false" style="--i: 6">
             <span class="emoji-icon" aria-hidden="true">➕</span>
           </button>
-          <button class="tool-button" type="button" data-tool="delete" data-name="delete" aria-label="delete mode" aria-pressed="false" style="--i: 4">
+          <button class="tool-button" type="button" data-tool="delete" data-name="delete" aria-label="delete mode" aria-pressed="false" style="--i: 5">
             <span class="emoji-icon" aria-hidden="true">➖</span>
           </button>
-          <button class="tool-button" type="button" data-tool="undo" data-name="undo" aria-label="undo" aria-disabled="true" style="--i: 3">
+          <button class="tool-button" type="button" data-tool="undo" data-name="undo" aria-label="undo" aria-disabled="true" style="--i: 4">
             <span class="emoji-icon" aria-hidden="true">↩️</span>
           </button>
-          <button class="tool-button" type="button" data-tool="redo" data-name="redo" aria-label="redo" aria-disabled="true" style="--i: 2">
+          <button class="tool-button" type="button" data-tool="redo" data-name="redo" aria-label="redo" aria-disabled="true" style="--i: 3">
             <span class="emoji-icon" aria-hidden="true">↪️</span>
+          </button>
+          <button class="tool-button" type="button" data-tool="layers" data-name="layers" aria-label="layers" aria-pressed="false" aria-controls="layers" style="--i: 2">
+            <span class="emoji-icon" aria-hidden="true">🗂️</span>
           </button>
           <button class="tool-button" type="button" data-tool="recenter" data-name="recenter" aria-label="recenter canvas" style="--i: 1">
             <span class="emoji-icon" aria-hidden="true">🎯</span>
@@ -99,18 +111,13 @@
       </div>
     </div>
 
-    <!-- timeline: ⏳ opens the history of the active branch -->
+    <!-- timeline: always shows the active branch's history as you work;
+         dragging the bar or tapping ⏳ opens it -->
     <div class="control-bar control-bar--timeline">
       <div class="glass timeline" data-open="false">
-        <span class="timeline__track" aria-hidden="true"></span>
         <div class="timeline__panel" id="timeline-panel">
           <p class="timeline__status" aria-live="polite"></p>
-          <div class="timeline__scrubber" role="slider" tabindex="0" aria-label="history position"
-               aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
-            <canvas class="timeline__ticks" aria-hidden="true"></canvas>
-            <div class="timeline__fill" aria-hidden="true"></div>
-            <div class="timeline__knob" aria-hidden="true"></div>
-          </div>
+          <span class="timeline__rail-space" aria-hidden="true"></span>
           <div class="timeline__controls">
             <button class="tool-button" type="button" data-timeline="play" data-name="play" aria-label="play">
               <span class="emoji-icon" aria-hidden="true">▶️</span>
@@ -126,7 +133,15 @@
                     aria-label="view branches">
               <span class="emoji-icon" aria-hidden="true">🌿</span>
             </button>
+            <button class="timeline__speed timeline__reset" type="button" data-timeline="reset"
+                    data-name="reset timeline" aria-label="reset timeline">reset</button>
           </div>
+        </div>
+        <div class="timeline__scrubber" role="slider" tabindex="0" aria-label="history position"
+             aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+          <canvas class="timeline__ticks" aria-hidden="true"></canvas>
+          <div class="timeline__fill" aria-hidden="true"></div>
+          <div class="timeline__knob" aria-hidden="true"></div>
         </div>
         <button class="timeline__toggle" type="button" data-name="timeline" aria-label="timeline"
                 aria-expanded="false" aria-controls="timeline-panel">
@@ -148,17 +163,57 @@
   <!-- object menu: actions for the selected emoji (opens by tapping the selection while editing) -->
   <div class="glass panel object-menu" role="menu" aria-label="emoji actions" hidden>
     <div class="object-menu__row">
-      <button class="menu-button" type="button" role="menuitem" data-menu="duplicate" data-name="duplicate">duplicate</button>
-      <button class="menu-button" type="button" role="menuitem" data-menu="group" data-name="group">group</button>
-      <button class="menu-button" type="button" role="menuitem" data-menu="ungroup" data-name="ungroup">ungroup</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="duplicate" data-name="duplicate" aria-label="duplicate">
+        <span class="menu-button__icon menu-button__icon--duplicate" aria-hidden="true"><span>🟦</span><span>🟦</span></span>
+        <span class="menu-button__label" aria-hidden="true">duplicate</span>
+      </button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="group" data-name="group" aria-label="group">
+        <span class="menu-button__icon" aria-hidden="true">🫂</span>
+        <span class="menu-button__label" aria-hidden="true">group</span>
+      </button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="ungroup" data-name="ungroup" aria-label="ungroup">
+        <span class="menu-button__icon" aria-hidden="true">✂️</span>
+        <span class="menu-button__label" aria-hidden="true">ungroup</span>
+      </button>
     </div>
     <div class="object-menu__row">
-      <button class="menu-button" type="button" role="menuitem" data-menu="front" data-name="bring to front">to front</button>
-      <button class="menu-button" type="button" role="menuitem" data-menu="forward" data-name="bring forward">forward</button>
-      <button class="menu-button" type="button" role="menuitem" data-menu="backward" data-name="send backward">backward</button>
-      <button class="menu-button" type="button" role="menuitem" data-menu="back" data-name="send to back">to back</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="front" data-name="bring to front" aria-label="bring to front">
+        <span class="menu-button__icon" aria-hidden="true">⏫</span>
+        <span class="menu-button__label" aria-hidden="true">to front</span>
+      </button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="forward" data-name="bring forward" aria-label="bring forward">
+        <span class="menu-button__icon" aria-hidden="true">🔼</span>
+        <span class="menu-button__label" aria-hidden="true">forward</span>
+      </button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="backward" data-name="send backward" aria-label="send backward">
+        <span class="menu-button__icon" aria-hidden="true">🔽</span>
+        <span class="menu-button__label" aria-hidden="true">backward</span>
+      </button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="back" data-name="send to back" aria-label="send to back">
+        <span class="menu-button__icon" aria-hidden="true">⏬</span>
+        <span class="menu-button__label" aria-hidden="true">to back</span>
+      </button>
     </div>
   </div>
+  </div>
+
+  <!-- layers: every emoji and group in stacking order (frontmost first).
+       stays open beside the canvas until closed -->
+  <section class="glass panel layers" id="layers" aria-label="layers" hidden>
+    <header class="layers__header">
+      <h2 class="layers__title">layers</h2>
+      <span class="layers__count"></span>
+      <button class="layers__close" type="button" data-name="close layers" aria-label="close layers">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <line x1="7" y1="7" x2="17" y2="17"/><line x1="17" y1="7" x2="7" y2="17"/>
+        </svg>
+      </button>
+    </header>
+    <div class="layers__scroll">
+      <ul class="layers__list"></ul>
+      <div class="layers__indicator" aria-hidden="true" hidden></div>
+    </div>
+  </section>
 
   <!-- branches: switch, rename, delete (from 🌿 in the timeline) -->
   <section class="glass panel branches" aria-label="branches" hidden>
@@ -177,6 +232,23 @@
       <button class="segmented__item" type="button" data-width="1080" data-height="1080">1:1</button>
       <button class="segmented__item" type="button" data-width="1080" data-height="1440">3:4</button>
       <button class="segmented__item" type="button" data-width="1920" data-height="1080">16:9</button>
+    </div>
+    <div class="canvas-panel__colors" role="group" aria-label="background color">
+      <button class="swatch" type="button" data-color="#000000" data-name="black" aria-label="black" style="--swatch: #000000"></button>
+      <button class="swatch" type="button" data-color="#FFFFFF" data-name="white" aria-label="white" style="--swatch: #FFFFFF"></button>
+      <button class="swatch" type="button" data-color="#8E8E93" data-name="gray" aria-label="gray" style="--swatch: #8E8E93"></button>
+      <button class="swatch" type="button" data-color="#FF3B30" data-name="red" aria-label="red" style="--swatch: #FF3B30"></button>
+      <button class="swatch" type="button" data-color="#FF9500" data-name="orange" aria-label="orange" style="--swatch: #FF9500"></button>
+      <button class="swatch" type="button" data-color="#FFCC00" data-name="yellow" aria-label="yellow" style="--swatch: #FFCC00"></button>
+      <button class="swatch" type="button" data-color="#34C759" data-name="green" aria-label="green" style="--swatch: #34C759"></button>
+      <button class="swatch" type="button" data-color="#007AFF" data-name="blue" aria-label="blue" style="--swatch: #007AFF"></button>
+      <button class="swatch" type="button" data-color="#AF52DE" data-name="purple" aria-label="purple" style="--swatch: #AF52DE"></button>
+      <button class="swatch" type="button" data-color="#FF2D55" data-name="pink" aria-label="pink" style="--swatch: #FF2D55"></button>
+      <button class="swatch" type="button" data-color="#A2845E" data-name="brown" aria-label="brown" style="--swatch: #A2845E"></button>
+      <!-- the color wheel: opens the system color picker for any other color -->
+      <label class="swatch swatch--wheel" data-name="any color">
+        <input class="swatch__input" type="color" value="#000000" aria-label="any color">
+      </label>
     </div>
     <form class="canvas-panel__size" novalidate>
       <label class="dimension">

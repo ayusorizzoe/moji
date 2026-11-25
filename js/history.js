@@ -131,6 +131,11 @@
       apply(st, op) { st.canvas = { ...st.canvas, width: op.to.width, height: op.to.height }; },
       revert(st, op) { st.canvas = { ...st.canvas, width: op.from.width, height: op.from.height }; },
     },
+    // canvas background color: from/to are '#rrggbb'
+    'set-background': {
+      apply(st, op) { st.canvas = { ...st.canvas, background: op.to }; },
+      revert(st, op) { st.canvas = { ...st.canvas, background: op.from }; },
+    },
     // move, resize, rotate (one completed gesture, any number of objects)
     'transform-objects': {
       apply(st, op) { st.objects = setFields(st.objects, op.changes, 'to'); },
@@ -146,7 +151,34 @@
       apply(st, op) { st.objects = orderBy(st.objects, op.to); },
       revert(st, op) { st.objects = orderBy(st.objects, op.from); },
     },
+    // layers panel drags and grouping: a new stacking order (full id lists,
+    // bottom to top) together with any group membership changes, as one step.
+    // groups are flat (an emoji belongs to at most one group) and every
+    // transform is absolute, so changing membership never moves anything.
+    'arrange': {
+      apply(st, op) { st.objects = setGroups(orderBy(st.objects, op.to), op.groups, 'to'); },
+      revert(st, op) { st.objects = setGroups(orderBy(st.objects, op.from), op.groups, 'from'); },
+    },
+    // visibility and locking: changes = [{ id, from: { hidden, locked }, to }]
+    'set-flags': {
+      apply(st, op) { st.objects = setFlags(st.objects, op.changes, 'to'); },
+      revert(st, op) { st.objects = setFlags(st.objects, op.changes, 'from'); },
+    },
   };
+
+  function setFlags(objects, changes, side) {
+    const byId = new Map(changes.map((c) => [c.id, c[side]]));
+    return objects.map((o) => {
+      const f = byId.get(o.id);
+      if (!f) return o;
+      const next = { ...o };
+      ['hidden', 'locked'].forEach((key) => {
+        if (f[key]) next[key] = true;
+        else delete next[key];
+      });
+      return next;
+    });
+  }
 
   function setFields(objects, changes, side) {
     const byId = new Map(changes.map((c) => [c.id, c[side]]));
@@ -397,10 +429,29 @@
       entries.splice(Math.min(i, entries.length), 0, { kind: 'out', object: o });
     });
     const canvasChanged = before.canvas.width !== after.canvas.width ||
-      before.canvas.height !== after.canvas.height;
+      before.canvas.height !== after.canvas.height ||
+      before.canvas.background !== after.canvas.background;
     const visible = canvasChanged || entries.some((e) => e.kind !== 'same') ||
       before.objects.some((o, i) => after.objects[i] !== o);
     return { entries, from: before.canvas, to: after.canvas, canvasChanged, visible };
+  }
+
+  // blends two '#rrggbb' colors (t = 0 → a, 1 → b)
+  function mixColor(a, b, t) {
+    if (a === b || !isColor(a) || !isColor(b)) return t < 0.5 ? a : b;
+    const ca = parseInt(a.slice(1), 16);
+    const cb = parseInt(b.slice(1), 16);
+    let out = '#';
+    for (let shift = 16; shift >= 0; shift -= 8) {
+      const x = (ca >> shift) & 255;
+      const y = (cb >> shift) & 255;
+      out += Math.round(x + (y - x) * t).toString(16).padStart(2, '0');
+    }
+    return out;
+  }
+
+  function isColor(value) {
+    return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
   }
 
   function sceneAt(transition, t) {
@@ -424,6 +475,7 @@
         ...transition.to,
         width: transition.from.width + (transition.to.width - transition.from.width) * e,
         height: transition.from.height + (transition.to.height - transition.from.height) * e,
+        background: mixColor(transition.from.background, transition.to.background, e),
       }
       : transition.to;
     return { canvas, objects };
@@ -446,7 +498,9 @@
       isFiniteNumber(o.x) && isFiniteNumber(o.y) &&
       isFiniteNumber(o.size) && o.size > 0 &&
       isFiniteNumber(o.rotation) && isFiniteNumber(o.order) &&
-      (o.groupId === undefined || typeof o.groupId === 'string');
+      (o.groupId === undefined || typeof o.groupId === 'string') &&
+      (o.hidden === undefined || typeof o.hidden === 'boolean') &&
+      (o.locked === undefined || typeof o.locked === 'boolean');
   }
 
   function isValidTransform(t) {
@@ -455,6 +509,9 @@
   }
 
   const isIndex = (i) => Number.isInteger(i) && i >= 0;
+  const isGroupChange = (c) => !!c && typeof c.id === 'string' &&
+    (c.from === null || typeof c.from === 'string') && (c.to === null || typeof c.to === 'string');
+  const isFlags = (f) => !!f && typeof f.hidden === 'boolean' && typeof f.locked === 'boolean';
   const isIdList = (list) => Array.isArray(list) && list.every((id) => typeof id === 'string');
 
   function isValidOp(op) {
@@ -471,6 +528,8 @@
         return Array.isArray(op.objects) && op.objects.every(isValidObject);
       case 'resize-canvas':
         return isValidDimensions(op.from) && isValidDimensions(op.to);
+      case 'set-background':
+        return isColor(op.from) && isColor(op.to);
       case 'transform-objects':
         return Array.isArray(op.changes) && op.changes.every((c) =>
           c && typeof c.id === 'string' && isValidTransform(c.from) && isValidTransform(c.to));
@@ -479,6 +538,12 @@
           (c.from === null || typeof c.from === 'string') && (c.to === null || typeof c.to === 'string'));
       case 'reorder':
         return isIdList(op.from) && isIdList(op.to);
+      case 'arrange':
+        return isIdList(op.from) && isIdList(op.to) && op.from.length === op.to.length &&
+          Array.isArray(op.groups) && op.groups.every(isGroupChange);
+      case 'set-flags':
+        return Array.isArray(op.changes) && op.changes.every((c) => c && typeof c.id === 'string' &&
+          isFlags(c.from) && isFlags(c.to));
       default:
         return false;
     }

@@ -36,7 +36,7 @@
 
   const H = window.MojiHistory;
 
-  const DEFAULT_CANVAS = { width: 1080, height: 1920, background: '#FFFFFF' };
+  const DEFAULT_CANVAS = { width: 1080, height: 1920, background: '#000000' };
   const CANVAS_MIN_SIZE = 64;
   const CANVAS_MAX_SIZE = 4096;          // keeps exports within mobile canvas limits
 
@@ -242,12 +242,41 @@
     requestRender();
   }
 
+  // phones: the canvas fills the whole screen behind the controls, like a
+  // story. it covers the screen when that crops only a little (9:16 on a
+  // tall phone); a shape far from the screen's own (1:1, 16:9) fits the
+  // full width or height instead, so nothing important is cut off.
+  const PHONE_MAX_SHORT_SIDE = 600;   // css px
+  const PHONE_MAX_COVER_CROP = 1.3;   // cover scale / contain scale
+
+  function isPhoneLayout() {
+    return Math.min(viewportWidth, viewportHeight) < PHONE_MAX_SHORT_SIDE;
+  }
+
+  // the bottom of the top-row controls (layout offsets, unaffected by animations)
+  function topControlsBottom() {
+    return Math.max(dom.settingsBar.offsetTop + dom.settingsBar.offsetHeight,
+      dom.toolsBar.offsetTop + dom.toolsBar.offsetHeight);
+  }
+
   // the view that fits the whole canvas between the top and bottom controls
+  // (on phones, the whole screen)
   function computeFitView() {
+    const canvas = scene().canvas;
+    if (isPhoneLayout() && viewportWidth && viewportHeight) {
+      const contain = Math.min(viewportWidth / canvas.width, viewportHeight / canvas.height);
+      const cover = Math.max(viewportWidth / canvas.width, viewportHeight / canvas.height);
+      return {
+        scale: cover / contain <= PHONE_MAX_COVER_CROP ? cover : contain,
+        tx: viewportWidth / 2,
+        ty: viewportHeight / 2,
+      };
+    }
+
     // layout offsets (not bounding rects) so control animations never affect the fit
     const settings = dom.settingsBar;
     const tools = dom.toolsBar;
-    const labelSpace = dom.canvasLabel.offsetHeight + 6;
+    const labelSpace = labelFullHeight + 6;
 
     const left = settings.offsetLeft;
     const right = tools.offsetLeft + tools.offsetWidth;
@@ -351,20 +380,89 @@
     return metrics;
   }
 
-  // draws one emoji object centered at (cx, cy) with a font size of px
+  // the visible ink of each glyph, measured once from its pixels: center
+  // offset and size in em units. measureText alone is not enough: some
+  // browsers report the font's full em box for color emoji, so a wide or
+  // short glyph (🏔️, 🚗) would sit off-center in its outline.
+  const glyphInk = new Map();
+  const INK_SIZE = 100;
+  const INK_BOX = 256;
+  const inkCanvas = document.createElement('canvas');
+  inkCanvas.width = INK_BOX;
+  inkCanvas.height = INK_BOX;
+  const inkContext = inkCanvas.getContext('2d', { willReadFrequently: true });
+
+  function getGlyphInk(emoji) {
+    let ink = glyphInk.get(emoji);
+    if (ink) return ink;
+    ink = { cx: 0, cy: 0, w: 1, h: 1 };
+    try {
+      const metrics = getGlyphMetrics(emoji);
+      const ctx = inkContext;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, INK_BOX, INK_BOX);
+      ctx.font = INK_SIZE + 'px ' + emojiFontFamily;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = metrics.baseline;
+      ctx.fillStyle = '#000000';
+      const c = INK_BOX / 2;
+      ctx.fillText(emoji, c + metrics.dx * INK_SIZE, c + metrics.dy * INK_SIZE);
+      const data = ctx.getImageData(0, 0, INK_BOX, INK_BOX).data;
+      let minX = INK_BOX;
+      let minY = INK_BOX;
+      let maxX = -1;
+      let maxY = -1;
+      for (let y = 0; y < INK_BOX; y += 1) {
+        for (let x = 0; x < INK_BOX; x += 1) {
+          if (data[(y * INK_BOX + x) * 4 + 3] > 24) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      const w = maxX - minX + 1;
+      const h = maxY - minY + 1;
+      // nothing drawn, or noise from canvas fingerprinting protection: keep
+      // the plain em box
+      if (maxX >= 0 && w < INK_BOX * 0.9 && h < INK_BOX * 0.9) {
+        ink = {
+          cx: ((minX + maxX + 1) / 2 - c) / INK_SIZE,
+          cy: ((minY + maxY + 1) / 2 - c) / INK_SIZE,
+          w: w / INK_SIZE,
+          h: h / INK_SIZE,
+        };
+      }
+    } catch (error) {
+      // unreadable canvas: the em box is a fine fallback
+    }
+    glyphInk.set(emoji, ink);
+    return ink;
+  }
+
+  // half the visible width and height of an object, in artwork px
+  function objectHalfSize(object) {
+    const ink = getGlyphInk(object.emoji);
+    return { hw: (ink.w * object.size) / 2, hh: (ink.h * object.size) / 2 };
+  }
+
+  // draws one emoji object with its visible center at (cx, cy) and a font
+  // size of px; rotation turns it around that visible center
   function drawEmoji(ctx, object, cx, cy, px) {
     if (px < 0.5) return;
     if (object.alpha !== undefined && object.alpha <= 0.01) return;
     const metrics = getGlyphMetrics(object.emoji);
+    const ink = getGlyphInk(object.emoji);
     ctx.save();
-    if (object.alpha !== undefined) ctx.globalAlpha = Math.min(1, object.alpha);
+    if (object.alpha !== undefined) ctx.globalAlpha *= Math.min(1, object.alpha);
     ctx.translate(cx, cy);
     if (object.rotation) ctx.rotate(object.rotation);
     ctx.font = px + 'px ' + emojiFontFamily;
     ctx.textAlign = 'center';
     ctx.textBaseline = metrics.baseline;
     ctx.fillStyle = '#000000';
-    ctx.fillText(object.emoji, metrics.dx * px, metrics.dy * px);
+    ctx.fillText(object.emoji, (metrics.dx - ink.cx) * px, (metrics.dy - ink.cy) * px);
     ctx.restore();
   }
 
@@ -428,6 +526,19 @@
     return { x: event.clientX - stageLeft, y: event.clientY - stageTop };
   }
 
+  // how visible artwork outside the canvas is: hidden while the canvas fills
+  // the screen (the fitted phone view or closer), faint once zoomed out,
+  // fading between the two as you pinch
+  const OVERFLOW_FAINT = 0.3;
+  let outsideAlpha = OVERFLOW_FAINT;
+
+  function overflowAlpha(rect) {
+    if (!viewportWidth || !viewportHeight) return OVERFLOW_FAINT;
+    const fullness = Math.max(rect.w / viewportWidth, rect.h / viewportHeight);
+    const t = Math.min(1, Math.max(0, (fullness - 0.85) / 0.13));
+    return OVERFLOW_FAINT * (1 - t);
+  }
+
   function render() {
     renderQueued = false;
     measureStage(); // safety net: never draw into a stretched buffer
@@ -442,17 +553,40 @@
     const x0 = snap(rect.x);
     const y0 = snap(rect.y);
     const shown = scene();
-    ctx.fillStyle = shown.canvas.background;
-    ctx.fillRect(x0, y0, snap(rect.x + rect.w) - x0, snap(rect.y + rect.h) - y0);
+    const x1 = snap(rect.x + rect.w);
+    const y1 = snap(rect.y + rect.h);
+    ctx.fillStyle = (shown === doc && backgroundPreview) || shown.canvas.background;
+    ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
 
-    // objects, inside and outside the canvas, in stacking order
+    // objects in stacking order, in two passes: fully inside the canvas,
+    // then faintly (or not at all) outside it. the overflow mask is only
+    // drawing: positions, hit testing and exports are unaffected.
+    outsideAlpha = overflowAlpha(rect);
     const scale = view.scale;
+    const visible = [];
     for (const object of shown.objects) {
+      if (object.hidden) continue;
       const px = object.size * scale;
       const sx = object.x * scale + view.tx;
       const sy = object.y * scale + view.ty;
       if (sx + px < 0 || sx - px > viewportWidth || sy + px < 0 || sy - px > viewportHeight) continue;
-      drawEmoji(ctx, object, sx, sy, px);
+      visible.push({ object, px, sx, sy, overflows: sx - px < x0 || sx + px > x1 || sy - px < y0 || sy + px > y1 });
+    }
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x0, y0, x1 - x0, y1 - y0);
+    ctx.clip();
+    visible.forEach((v) => drawEmoji(ctx, v.object, v.sx, v.sy, v.px));
+    ctx.restore();
+    if (outsideAlpha > 0.01 && visible.some((v) => v.overflows)) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, viewportWidth, viewportHeight);
+      ctx.rect(x0, y0, x1 - x0, y1 - y0);
+      ctx.clip('evenodd');
+      ctx.globalAlpha = outsideAlpha;
+      visible.forEach((v) => { if (v.overflows) drawEmoji(ctx, v.object, v.sx, v.sy, v.px); });
+      ctx.restore();
     }
 
     // selection outline and handles (interface only, never exported)
@@ -462,6 +596,10 @@
     positionCanvasLabel(rect);
     if (openPanel === 'canvas') positionCanvasPanel();
     if (menuOpen) positionObjectMenu();
+    if (layers.open) {
+      renderLayers();
+      positionLayersPanel();
+    }
   }
 
   // keep the css grid aligned with the artwork origin at a quiet density
@@ -483,20 +621,77 @@
       `${mx}px ${my}px, ${mx}px ${my}px, ${sx}px ${sy}px, ${sx}px ${sy}px`;
   }
 
+  let labelFullHeight = 30; // the label's height outside the canvas
+  let labelMorphTimer = null;
+  const labelState = { inside: null, width: '', miniW: '', miniH: '', miniBg: '' };
+
   function positionCanvasLabel(rect) {
-    const width = dom.canvasLabel.offsetWidth;
-    const height = dom.canvasLabel.offsetHeight;
-    const x = Math.round(rect.x);
-    const y = Math.round(rect.y - height - 6);
-    dom.canvasLabel.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    // outside, just above the canvas, when there is room below the top
+    // controls; otherwise a round button beside ⚙️
+    const label = dom.canvasLabel;
+    const morphing = label.classList.contains('is-morphing');
+    if (!labelState.inside && !morphing && label.offsetHeight) labelFullHeight = label.offsetHeight;
+    const inside = rect.y - labelFullHeight - 6 < topControlsBottom() + 6;
+
+    if (labelState.inside !== inside) {
+      // animate the move between the two places (not on the first layout)
+      if (labelState.inside === null) {
+        // first layout: take its place without animating
+        label.style.transition = 'none';
+        requestAnimationFrame(() => requestAnimationFrame(() => { label.style.transition = ''; }));
+      } else if (!reducedMotion.matches) {
+        label.classList.add('is-morphing');
+        clearTimeout(labelMorphTimer);
+        labelMorphTimer = setTimeout(() => label.classList.remove('is-morphing'), PANEL_HIDE_DELAY + 80);
+      }
+      labelState.inside = inside;
+      label.dataset.inside = String(inside);
+    }
+
+    // explicit widths so the capsule and the circle morph into each other
+    const size = dom.settingsBar.offsetHeight;
+    const width = inside ? size + 'px' : (dom.canvasLabelText.offsetWidth + 24) + 'px';
+    if (labelState.width !== width) {
+      labelState.width = width;
+      label.style.width = width;
+    }
+
+    // the miniature: the canvas's shape and color, fitted in 22px
+    const canvas = scene().canvas;
+    const ratio = canvas.width / canvas.height;
+    const miniW = Math.round(ratio >= 1 ? 22 : Math.max(8, 22 * ratio)) + 'px';
+    const miniH = Math.round(ratio >= 1 ? Math.max(8, 22 / ratio) : 22) + 'px';
+    const miniBg = (scene() === doc && backgroundPreview) || canvas.background;
+    if (labelState.miniW !== miniW || labelState.miniH !== miniH || labelState.miniBg !== miniBg) {
+      labelState.miniW = miniW;
+      labelState.miniH = miniH;
+      labelState.miniBg = miniBg;
+      label.style.setProperty('--mini-w', miniW);
+      label.style.setProperty('--mini-h', miniH);
+      label.style.setProperty('--mini-bg', miniBg);
+    }
+
+    let x;
+    let y;
+    if (inside) {
+      x = dom.settingsBar.offsetLeft + dom.settingsBar.offsetWidth + 8;
+      y = dom.settingsBar.offsetTop;
+    } else {
+      // stays on screen when the canvas's left edge is panned away
+      x = Math.round(Math.max(rect.x, Math.min(8, rect.x + rect.w - parseFloat(width))));
+      y = Math.round(rect.y - labelFullHeight - 6);
+    }
+    label.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+    const labelWidth = parseFloat(width);
+    const labelHeight = inside ? size : labelFullHeight;
 
     // the tools drop-down may reach down over the label; the label then
     // steps aside (fades, never moves) until the drop-down folds away
     let covered = false;
     if (mode !== 'idle' && !dom.toolsDrop.hidden) {
       const drop = dom.toolsDrop.getBoundingClientRect();
-      covered = x < drop.right + 4 && x + width > drop.left - 4 &&
-        y < drop.bottom + 4 && y + height > drop.top - 4;
+      covered = x < drop.right + 4 && x + labelWidth > drop.left - 4 &&
+        y < drop.bottom + 4 && y + labelHeight > drop.top - 4;
     }
     dom.canvasLabel.dataset.covered = String(covered);
   }
@@ -510,13 +705,24 @@
     commit({ type: 'add-objects', label: 'add', objects: [object], indices: [doc.objects.length] });
   }
 
+  // hidden and locked objects are out of reach of ordinary canvas taps,
+  // drags, deletes and selection; the layers panel still reaches them
+  function isSelectable(object) {
+    return !object.hidden && !object.locked;
+  }
+
   // every object under a screen point, topmost first
   function hitTestAll(sx, sy) {
     const point = screenToWorld(sx, sy);
+    if (outsideAlpha <= 0.01) {
+      const c = scene().canvas;
+      if (Math.abs(point.x) > c.width / 2 || Math.abs(point.y) > c.height / 2) return [];
+    }
     const minHalf = MIN_HIT_RADIUS / view.scale;
     const hits = [];
     for (let i = doc.objects.length - 1; i >= 0; i -= 1) {
       const object = doc.objects[i];
+      if (!isSelectable(object)) continue; // hidden and locked layers ignore the canvas
       let dx = point.x - object.x;
       let dy = point.y - object.y;
       if (object.rotation) {
@@ -526,8 +732,8 @@
         dy = dx * sin + dy * cos;
         dx = rx;
       }
-      const half = Math.max(object.size / 2, minHalf);
-      if (Math.abs(dx) <= half && Math.abs(dy) <= half) hits.push(object);
+      const { hw, hh } = objectHalfSize(object);
+      if (Math.abs(dx) <= Math.max(hw, minHalf) && Math.abs(dy) <= Math.max(hh, minHalf)) hits.push(object);
     }
     return hits;
   }
@@ -543,9 +749,17 @@
   }
 
   // removes every emoji, inside and outside the canvas, as one undoable step
+  // locked and hidden layers are kept
   function clearAllObjects() {
-    if (doc.objects.length === 0) return;
-    commit({ type: 'clear-objects', objects: doc.objects.slice() });
+    const removable = doc.objects.filter(isSelectable);
+    if (removable.length === 0) return;
+    if (removable.length === doc.objects.length) {
+      commit({ type: 'clear-objects', objects: doc.objects.slice() });
+      return;
+    }
+    const indices = [];
+    doc.objects.forEach((o, i) => { if (isSelectable(o)) indices.push(i); });
+    commit({ type: 'delete-objects', label: 'delete all', objects: removable, indices });
   }
 
   function resizeCanvas(width, height) {
@@ -555,6 +769,7 @@
   }
 
   function onDocumentChanged() {
+    refreshClosedTimeline(true);
     updateHistoryButtons();
     updateClearButton();
     syncCanvasPanel();
@@ -593,7 +808,7 @@
   // an object together with the rest of its group
   function unitIds(object) {
     if (!object.groupId) return [object.id];
-    return doc.objects.filter((o) => o.groupId === object.groupId).map((o) => o.id);
+    return doc.objects.filter((o) => o.groupId === object.groupId && isSelectable(o)).map((o) => o.id);
   }
 
   function selectedObjects() {
@@ -601,10 +816,10 @@
   }
 
   function objectCorners(o) {
-    const h = o.size / 2;
+    const { hw, hh } = objectHalfSize(o);
     const cos = Math.cos(o.rotation);
     const sin = Math.sin(o.rotation);
-    return [[-h, -h], [h, -h], [h, h], [-h, h]].map(([x, y]) => ({
+    return [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].map(([x, y]) => ({
       x: o.x + x * cos - y * sin,
       y: o.y + x * sin + y * cos,
     }));
@@ -615,7 +830,8 @@
     if (objects.length === 0) return null;
     if (objects.length === 1) {
       const o = objects[0];
-      return { cx: o.x, cy: o.y, w: o.size, h: o.size, angle: o.rotation };
+      const { hw, hh } = objectHalfSize(o);
+      return { cx: o.x, cy: o.y, w: hw * 2, h: hh * 2, angle: o.rotation };
     }
     let minX = Infinity;
     let minY = Infinity;
@@ -658,7 +874,7 @@
   // objects that no longer exist and refresh the outline
   function syncSelection() {
     if (selection.ids.size === 0) return;
-    const existing = new Set(doc.objects.map((o) => o.id));
+    const existing = new Set(doc.objects.filter(isSelectable).map((o) => o.id));
     const kept = [...selection.ids].filter((id) => existing.has(id));
     if (kept.length !== selection.ids.size) {
       selection.ids = new Set(kept);
@@ -717,7 +933,7 @@
   }
 
   function hitHandle(x, y) {
-    if (!selection.editing) return null;
+    if (!selection.editing || outlineStyle !== 'box') return null;
     const h = handlePositions();
     if (!h) return null;
     if (Math.hypot(x - h.rotate.x, y - h.rotate.y) <= HANDLE_RADIUS) return 'rotate';
@@ -725,8 +941,25 @@
     return null;
   }
 
+  // how the selection shows: on touch screens an outline that follows each
+  // emoji's own shape (editing with fingers needs no handles); with a mouse
+  // the box with resize and rotate handles. follows the last input used.
+  const coarsePointer = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+  let outlineStyle = coarsePointer ? 'shape' : 'box';
+
+  function noteInputType(pointerType) {
+    const next = pointerType === 'mouse' ? 'box' : 'shape';
+    if (next === outlineStyle) return;
+    outlineStyle = next;
+    requestRender();
+  }
+
   // drawn on the stage after the artwork; never part of an export
   function drawSelection(ctx) {
+    if (outlineStyle === 'shape') {
+      drawShapeOutlines(ctx);
+      return;
+    }
     const h = handlePositions();
     if (!h) return;
     const f = h.frame;
@@ -761,6 +994,80 @@
     ctx.restore();
   }
 
+  // shape outline: the emoji's silhouette, grown by a few pixels, minus the
+  // silhouette itself, leaves a ring that hugs the glyph. built in device
+  // pixels on a scratch canvas and cached while nothing changes.
+  const OUTLINE_WIDTH = 3;          // css px
+  const OUTLINE_MAX_PIXELS = 1400;  // device px; larger rings are drawn scaled
+  const outlineCache = new Map();
+  const outlineMask = document.createElement('canvas');
+
+  function drawShapeOutlines(ctx) {
+    const color = selection.editing ? 'rgba(0, 113, 227, 1)' : '#FFFFFF';
+    selectedObjects().forEach((object) => {
+      const sx = object.x * view.scale + view.tx;
+      const sy = object.y * view.scale + view.ty;
+      const ring = outlineRing(object, object.size * view.scale, color);
+      if (!ring) return;
+      const w = ring.width / ring.ratio;
+      const h = ring.height / ring.ratio;
+      ctx.save();
+      ctx.shadowColor = 'rgba(15, 20, 25, 0.35)';
+      ctx.shadowBlur = 6;
+      ctx.drawImage(ring, sx - w / 2, sy - h / 2, w, h);
+      ctx.restore();
+    });
+  }
+
+  function outlineRing(object, px, color) {
+    if (px < 1) return null;
+    const rotation = object.rotation || 0;
+    const key = [object.emoji, px.toFixed(1), rotation.toFixed(3), color, pixelRatio].join('|');
+    let ring = outlineCache.get(key);
+    if (ring) {
+      outlineCache.delete(key);
+      outlineCache.set(key, ring); // most recently used last
+      return ring;
+    }
+
+    const ink = getGlyphInk(object.emoji);
+    // device pixels, capped for very large emoji
+    let ratio = pixelRatio;
+    const diagonal = Math.hypot(ink.w, ink.h) * px;
+    if (diagonal * ratio > OUTLINE_MAX_PIXELS) ratio = OUTLINE_MAX_PIXELS / diagonal;
+    const grow = OUTLINE_WIDTH * ratio;
+    const size = Math.ceil(diagonal * ratio + grow * 2 + 8);
+
+    // silhouette in the outline color
+    outlineMask.width = size;
+    outlineMask.height = size;
+    const m = outlineMask.getContext('2d');
+    m.setTransform(ratio, 0, 0, ratio, 0, 0);
+    drawEmoji(m, { emoji: object.emoji, rotation }, size / 2 / ratio, size / 2 / ratio, px);
+    m.setTransform(1, 0, 0, 1, 0, 0);
+    m.globalCompositeOperation = 'source-in';
+    m.fillStyle = color;
+    m.fillRect(0, 0, size, size);
+
+    // grow it in every direction, then cut the silhouette back out
+    ring = document.createElement('canvas');
+    ring.width = size;
+    ring.height = size;
+    ring.ratio = ratio;
+    const r = ring.getContext('2d');
+    const steps = 16;
+    for (let i = 0; i < steps; i += 1) {
+      const a = (i / steps) * Math.PI * 2;
+      r.drawImage(outlineMask, Math.cos(a) * grow, Math.sin(a) * grow);
+    }
+    r.globalCompositeOperation = 'destination-out';
+    r.drawImage(outlineMask, 0, 0);
+
+    outlineCache.set(key, ring);
+    while (outlineCache.size > 24) outlineCache.delete(outlineCache.keys().next().value);
+    return ring;
+  }
+
   function roundedRect(ctx, x, y, w, h, r) {
     const radius = Math.min(r, w / 2, h / 2);
     ctx.beginPath();
@@ -787,6 +1094,7 @@
       changed: false,
     };
     closeObjectMenu();
+    document.body.dataset.transforming = 'true';
     return true;
   }
 
@@ -841,6 +1149,7 @@
     if (!transform) return;
     const t = transform;
     transform = null;
+    delete document.body.dataset.transforming;
     if (!t.changed) return;
     const changes = [];
     t.origin.forEach((from, id) => {
@@ -938,12 +1247,47 @@
     setSelection(copies.map((c) => c.id), { editing: true });
   }
 
+  // grouping also gathers the members into one block in the stacking order,
+  // where the topmost of them was, so the group is one folder in the layers
+  // panel. the members keep their order among themselves.
   function groupSelection() {
     if (selectedUnitCount() < 2) return;
     const groupId = createId('group');
-    const changes = selectedObjects().map((o) => ({ id: o.id, from: o.groupId || null, to: groupId }));
+    const ids = doc.objects.map((o) => o.id);
+    const top = Math.max(...ids.map((id, i) => (selection.ids.has(id) ? i : -1)));
+    const members = ids.filter((id) => selection.ids.has(id));
+    const order = [];
+    ids.forEach((id, i) => {
+      if (!selection.ids.has(id)) order.push(id);
+      if (i === top) order.push(...members);
+    });
+    const groupOf = new Map(doc.objects.map((o) => [o.id, o.groupId || null]));
+    members.forEach((id) => groupOf.set(id, groupId));
     keepFrameOnSync = true;
-    commit({ type: 'set-groups', label: 'group', changes });
+    commitArrangement(order, groupOf, 'group');
+  }
+
+  // one 'arrange' step from a new order (bottom to top) and group map.
+  // a group left with a single member dissolves in the same step.
+  function arrangementOp(order, groupOf, label) {
+    const counts = new Map();
+    groupOf.forEach((g) => { if (g) counts.set(g, (counts.get(g) || 0) + 1); });
+    const from = doc.objects.map((o) => o.id);
+    const groups = [];
+    doc.objects.forEach((o) => {
+      let to = groupOf.get(o.id) || null;
+      if (to && counts.get(to) < 2) to = null;
+      const before = o.groupId || null;
+      if (to !== before) groups.push({ id: o.id, from: before, to });
+    });
+    const same = groups.length === 0 && from.every((id, i) => id === order[i]);
+    return same ? null : { type: 'arrange', label, from, to: order.slice(), groups };
+  }
+
+  function commitArrangement(order, groupOf, label) {
+    const op = arrangementOp(order, groupOf, label);
+    if (op) commit(op);
+    return Boolean(op);
   }
 
   function ungroupSelection() {
@@ -1015,6 +1359,528 @@
   }
 
 
+  /* 7d. layers panel
+     ------------------------------------------------------------------------
+     🗂️ opens a floating list of every emoji and group in stacking order,
+     frontmost first. it stays open beside the canvas until closed, follows
+     the canvas selection both ways, and shows the previewed moment (read
+     only) while the timeline is open.
+
+     groups are folders: collapsed, the row selects and toggles the whole
+     group; expanded, each member is its own row that can be selected,
+     hidden or locked without ungrouping. expanding is an interface
+     preference only, never a history step.
+
+     drag a row's grip to restack it, or to move an emoji into, out of, or
+     between groups. the canvas follows live; the whole drag is one 'arrange'
+     step when it ends, and nothing at all if it is cancelled.
+     ======================================================================== */
+
+  const layers = {
+    open: false,
+    expanded: new Set(),   // group ids shown open
+    drag: null,
+    shownObjects: null,    // what the list was last built from
+    shownKey: '',
+  };
+  const LAYER_EDGE_SCROLL = 36;  // px from the list's edge where dragging scrolls
+  const LAYER_SCROLL_SPEED = 9;  // px per frame at the very edge
+
+  const emojiNames = new Map();
+  function emojiName(emoji) {
+    if (emojiNames.size === 0) {
+      EMOJI_CATEGORIES.forEach((category) => category.items.forEach(([e, name]) => {
+        emojiNames.set(e, name);
+        emojiNames.set(e.replace(/️/g, ''), name);
+      }));
+    }
+    return emojiNames.get(emoji) || emojiNames.get(emoji.replace(/️/g, '')) || emoji;
+  }
+
+  const ICONS = {
+    eye: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg>',
+    eyeOff: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><line x1="4" y1="20" x2="20" y2="4"/></svg>',
+    lock: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/></svg>',
+    unlock: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="5.5" y="10.5" width="13" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 6.8-1.2"/></svg>',
+    grip: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="6" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="6" y1="16" x2="18" y2="16"/></svg>',
+    chevron: '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><polyline points="10 7 15 12 10 17"/></svg>',
+  };
+
+  // the list's structure, frontmost first: emoji and groups (with members,
+  // frontmost first). a group sits where its topmost member is.
+  function layerEntries(objects) {
+    const entries = [];
+    const seen = new Set();
+    for (let i = objects.length - 1; i >= 0; i -= 1) {
+      const o = objects[i];
+      if (!o.groupId) {
+        entries.push({ type: 'object', id: o.id, object: o });
+      } else if (!seen.has(o.groupId)) {
+        seen.add(o.groupId);
+        const members = [];
+        for (let j = i; j >= 0; j -= 1) if (objects[j].groupId === o.groupId) members.push(objects[j]);
+        entries.push({ type: 'group', id: o.groupId, members });
+      }
+    }
+    return entries;
+  }
+
+  function layersReadOnly() {
+    return timeline.open;
+  }
+
+  function toggleLayersPanel() {
+    if (layers.open) closeLayersPanel();
+    else openLayersPanel();
+  }
+
+  function openLayersPanel() {
+    layers.open = true;
+    dom.layersTool.setAttribute('aria-pressed', 'true');
+    layers.shownKey = '';
+    renderLayers();
+    showAnimated(dom.layers);
+    positionLayersPanel();
+  }
+
+  function closeLayersPanel() {
+    if (!layers.open) return false;
+    cancelLayerDrag();
+    layers.open = false;
+    dom.layersTool.setAttribute('aria-pressed', 'false');
+    hideAnimated(dom.layers);
+    return true;
+  }
+
+  // under the tools (and their drop-down tab), above the timeline
+  function positionLayersPanel() {
+    if (!layers.open) return;
+    const margin = 8;
+    let top = dom.toolsBar.getBoundingClientRect().bottom;
+    if (!dom.toolsDrop.hidden) top = Math.max(top, dom.toolsDrop.getBoundingClientRect().bottom);
+    top += margin;
+    const bottom = dom.timelineBar.getBoundingClientRect().top - margin;
+    let height = Math.max(120, bottom - top);
+    if (isPhoneLayout()) height = Math.min(height, Math.round(viewportHeight * 0.42));
+    const style = dom.layers.style;
+    const nextTop = Math.round(top) + 'px';
+    const nextMax = Math.round(height) + 'px';
+    if (style.top !== nextTop) style.top = nextTop;
+    if (style.maxHeight !== nextMax) style.maxHeight = nextMax;
+  }
+
+  // rebuilds the list when the artwork, selection or folders change (never
+  // during a layer drag, whose list stays still under the finger)
+  function renderLayers() {
+    if (!layers.open || layers.drag) return;
+    const shown = scene();
+    const readOnly = layersReadOnly();
+    const key = [readOnly, [...selection.ids].join(','), [...layers.expanded].join(',')].join('|');
+    if (shown.objects === layers.shownObjects && key === layers.shownKey) return;
+    layers.shownObjects = shown.objects;
+    layers.shownKey = key;
+    dom.layers.dataset.readonly = String(readOnly);
+
+    const entries = layerEntries(shown.objects);
+    // forget folders that no longer exist
+    const groupIds = new Set(entries.filter((e) => e.type === 'group').map((e) => e.id));
+    layers.expanded.forEach((id) => { if (!groupIds.has(id)) layers.expanded.delete(id); });
+
+    const count = shown.objects.length;
+    dom.layersCount.textContent = String(count);
+    const list = dom.layersList;
+    const scrollTop = dom.layersScroll.scrollTop;
+    list.textContent = '';
+    if (count === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'layers__empty';
+      empty.textContent = 'nothing placed yet';
+      list.appendChild(empty);
+      return;
+    }
+    const selected = readOnly ? new Set() : selection.ids;
+    entries.forEach((entry) => {
+      if (entry.type === 'object') {
+        list.appendChild(layerRow(entry.object, 0, null, selected));
+        return;
+      }
+      const expanded = layers.expanded.has(entry.id);
+      list.appendChild(groupRow(entry, expanded, selected));
+      if (expanded) entry.members.forEach((o) => list.appendChild(layerRow(o, 1, entry.id, selected)));
+    });
+    dom.layersScroll.scrollTop = scrollTop;
+  }
+
+  function layerRow(o, depth, groupId, selected) {
+    const row = document.createElement('li');
+    row.className = 'layer-row';
+    row.dataset.kind = groupId ? 'child' : 'object';
+    row.dataset.id = o.id;
+    if (groupId) row.dataset.group = groupId;
+    row.style.setProperty('--depth', depth);
+    row.dataset.hidden = String(Boolean(o.hidden));
+    row.setAttribute('aria-selected', String(selected.has(o.id)));
+    const spacer = document.createElement('span');
+    spacer.className = 'layer-row__spacer';
+    const thumb = document.createElement('span');
+    thumb.className = 'layer-row__thumb';
+    thumb.setAttribute('aria-hidden', 'true');
+    thumb.textContent = o.emoji;
+    const name = document.createElement('span');
+    name.className = 'layer-row__name';
+    name.textContent = emojiName(o.emoji);
+    row.append(spacer, thumb, name, ...layerControls(Boolean(o.hidden), Boolean(o.locked), name.textContent));
+    return row;
+  }
+
+  function groupRow(entry, expanded, selected) {
+    const row = document.createElement('li');
+    row.className = 'layer-row';
+    row.dataset.kind = 'group';
+    row.dataset.id = entry.id;
+    row.dataset.group = entry.id;
+    row.setAttribute('aria-expanded', String(expanded));
+    const hidden = entry.members.every((o) => o.hidden);
+    const locked = entry.members.every((o) => o.locked);
+    row.dataset.hidden = String(hidden);
+    const reachable = entry.members.filter(isSelectable);
+    row.setAttribute('aria-selected', String(reachable.length > 0 && reachable.every((o) => selected.has(o.id))));
+    const expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'layer-row__expand';
+    expand.dataset.layerAction = 'expand';
+    expand.setAttribute('aria-label', expanded ? 'collapse group' : 'expand group');
+    expand.innerHTML = ICONS.chevron;
+    const thumb = document.createElement('span');
+    thumb.className = 'layer-row__thumb layer-row__thumb--group';
+    thumb.setAttribute('aria-hidden', 'true');
+    entry.members.slice(0, 3).reverse().forEach((o) => {
+      const e = document.createElement('span');
+      e.textContent = o.emoji;
+      thumb.appendChild(e);
+    });
+    const name = document.createElement('span');
+    name.className = 'layer-row__name';
+    name.textContent = `group · ${entry.members.length}`;
+    row.append(expand, thumb, name, ...layerControls(hidden, locked, 'group'));
+    return row;
+  }
+
+  function layerControls(hidden, locked, label) {
+    const eye = document.createElement('button');
+    eye.type = 'button';
+    eye.className = 'layer-row__toggle';
+    eye.dataset.layerAction = 'visibility';
+    eye.dataset.name = hidden ? 'show' : 'hide';
+    eye.setAttribute('aria-pressed', String(hidden));
+    eye.setAttribute('aria-label', `hide ${label}`);
+    eye.innerHTML = hidden ? ICONS.eyeOff : ICONS.eye;
+    const lock = document.createElement('button');
+    lock.type = 'button';
+    lock.className = 'layer-row__toggle';
+    lock.dataset.layerAction = 'lock';
+    lock.dataset.name = locked ? 'unlock' : 'lock';
+    lock.setAttribute('aria-pressed', String(locked));
+    lock.setAttribute('aria-label', `lock ${label}`);
+    lock.innerHTML = locked ? ICONS.lock : ICONS.unlock;
+    const grip = document.createElement('span');
+    grip.className = 'layer-row__grip';
+    grip.dataset.layerAction = 'drag';
+    grip.setAttribute('aria-hidden', 'true');
+    grip.innerHTML = ICONS.grip;
+    return [eye, lock, grip];
+  }
+
+  // the objects a row stands for
+  function rowObjects(row) {
+    if (row.dataset.kind === 'group') return doc.objects.filter((o) => o.groupId === row.dataset.id);
+    const o = doc.objects.find((x) => x.id === row.dataset.id);
+    return o ? [o] : [];
+  }
+
+  function onLayersClick(event) {
+    const row = event.target.closest('.layer-row');
+    if (!row) return;
+    const control = event.target.closest('[data-layer-action]');
+    const action = control ? control.dataset.layerAction : 'select';
+    if (action === 'drag') return;
+    if (action === 'expand') {
+      // an interface preference: no history step
+      const id = row.dataset.id;
+      if (layers.expanded.has(id)) layers.expanded.delete(id);
+      else layers.expanded.add(id);
+      renderLayers();
+      return;
+    }
+    if (layersReadOnly()) return;
+    const objects = rowObjects(row);
+    if (objects.length === 0) return;
+
+    if (action === 'visibility' || action === 'lock') {
+      const key = action === 'visibility' ? 'hidden' : 'locked';
+      const on = !objects.every((o) => o[key]); // a mixed group turns fully on
+      const changes = objects.filter((o) => Boolean(o[key]) !== on).map((o) => {
+        const from = { hidden: Boolean(o.hidden), locked: Boolean(o.locked) };
+        return { id: o.id, from, to: { ...from, [key]: on } };
+      });
+      if (changes.length) {
+        const label = key === 'hidden' ? (on ? 'hide' : 'show') : (on ? 'lock' : 'unlock');
+        commit({ type: 'set-flags', label, changes });
+      }
+      showCaption(control.dataset.name, control);
+      return;
+    }
+
+    // select: hidden and locked layers stay out of the canvas selection
+    const reachable = objects.filter(isSelectable).map((o) => o.id);
+    if (reachable.length === 0) {
+      showCaption(objects.every((o) => o.hidden) ? 'hidden' : 'locked', row.querySelector('.layer-row__name'));
+      return;
+    }
+    lastTap = null;
+    if (event.shiftKey || event.metaKey || event.ctrlKey) {
+      const next = new Set(selection.ids);
+      const all = reachable.every((id) => next.has(id));
+      reachable.forEach((id) => (all ? next.delete(id) : next.add(id)));
+      setSelection(next);
+    } else {
+      setSelection(reachable);
+    }
+  }
+
+  // ----- dragging rows -----
+
+  function onLayerGripDown(event) {
+    const grip = event.target.closest('.layer-row__grip');
+    if (!grip || layers.drag || layersReadOnly()) return;
+    if (event.pointerType === 'mouse' && event.button !== 0) return;
+    event.preventDefault();
+    const row = grip.closest('.layer-row');
+    try { grip.setPointerCapture(event.pointerId); } catch (e) { /* synthetic */ }
+    const kind = row.dataset.kind === 'group' ? 'group' : 'object';
+    layers.drag = {
+      pointerId: event.pointerId,
+      grip,
+      kind,
+      id: row.dataset.id,
+      fromGroup: kind === 'object' ? (row.dataset.group || null) : null,
+      original: doc.objects,
+      y: event.clientY,
+      target: null,
+      frame: null,
+    };
+    // the dragged row (and a group's members) step back while it moves
+    dom.layersList.querySelectorAll('.layer-row').forEach((r) => {
+      if (r.dataset.id === layers.drag.id || (kind === 'group' && r.dataset.group === layers.drag.id)) {
+        r.classList.add('is-dragging');
+      }
+    });
+    document.body.dataset.layerDrag = 'true';
+    closeObjectMenu();
+    updateLayerDrag();
+    layers.drag.frame = requestAnimationFrame(layerDragFrame);
+  }
+
+  function onLayerGripMove(event) {
+    const drag = layers.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.y = event.clientY;
+    updateLayerDrag();
+  }
+
+  function onLayerGripUp(event) {
+    const drag = layers.drag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    if (event.type === 'pointercancel') {
+      cancelLayerDrag();
+      return;
+    }
+    const result = drag.target ? arrangementFor(drag, drag.target) : null;
+    endLayerDrag();
+    if (result) {
+      keepFrameOnSync = false;
+      commitArrangement(result.order, result.groupOf, result.label);
+    }
+  }
+
+  // put everything back as it was, with no history step
+  function cancelLayerDrag() {
+    if (!layers.drag) return;
+    endLayerDrag();
+    requestRender();
+  }
+
+  function endLayerDrag() {
+    const drag = layers.drag;
+    cancelAnimationFrame(drag.frame);
+    doc.objects = drag.original;
+    layers.drag = null;
+    delete document.body.dataset.layerDrag;
+    dom.layersIndicator.hidden = true;
+    layers.shownKey = '';
+    renderLayers();
+    syncSelection();
+  }
+
+  // scrolls the list while the finger rests near its top or bottom edge
+  function layerDragFrame() {
+    const drag = layers.drag;
+    if (!drag) return;
+    const box = dom.layersScroll.getBoundingClientRect();
+    let delta = 0;
+    if (drag.y < box.top + LAYER_EDGE_SCROLL) delta = -LAYER_SCROLL_SPEED * Math.min(1, (box.top + LAYER_EDGE_SCROLL - drag.y) / LAYER_EDGE_SCROLL);
+    else if (drag.y > box.bottom - LAYER_EDGE_SCROLL) delta = LAYER_SCROLL_SPEED * Math.min(1, (drag.y - box.bottom + LAYER_EDGE_SCROLL) / LAYER_EDGE_SCROLL);
+    if (delta) {
+      const before = dom.layersScroll.scrollTop;
+      dom.layersScroll.scrollTop += delta;
+      if (dom.layersScroll.scrollTop !== before) updateLayerDrag();
+    }
+    drag.frame = requestAnimationFrame(layerDragFrame);
+  }
+
+  // where the pointer would drop: { parent: groupId|null, refId, where } with
+  // where = 'before' | 'after' | 'inside' (inside = top of that group)
+  function layerDropTarget(drag) {
+    const rows = [...dom.layersList.querySelectorAll('.layer-row')].filter((r) => !r.classList.contains('is-dragging'));
+    if (rows.length === 0) return null;
+    const y = drag.y;
+    const first = rows[0].getBoundingClientRect();
+    if (y < first.top) return topLevelTarget(rows[0], 'before');
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i];
+      const r = row.getBoundingClientRect();
+      if (y < r.top || y > r.bottom) continue;
+      const f = (y - r.top) / r.height;
+      const kind = row.dataset.kind;
+      if (kind === 'group') {
+        const expanded = row.getAttribute('aria-expanded') === 'true';
+        if (f < 0.25) return { parent: null, refId: row.dataset.id, where: 'before', row };
+        if (drag.kind === 'object' && (f < 0.75 || expanded)) return { parent: row.dataset.id, refId: null, where: 'inside', row };
+        if (drag.kind === 'group' && expanded && f >= 0.5) return { parent: null, refId: row.dataset.id, where: 'after', row: lastRowOf(rows, row.dataset.id) || row };
+        return { parent: null, refId: row.dataset.id, where: f < 0.5 ? 'before' : 'after', row };
+      }
+      if (kind === 'child') {
+        if (drag.kind === 'group') return topLevelTarget(row, f < 0.5 ? 'before' : 'after', rows);
+        const next = rows[i + 1];
+        const isLast = !next || next.dataset.group !== row.dataset.group || next.dataset.kind === 'group';
+        if (isLast && f > 0.7) return { parent: null, refId: row.dataset.group, where: 'after', row };
+        return { parent: row.dataset.group, refId: row.dataset.id, where: f < 0.5 ? 'before' : 'after', row };
+      }
+      return { parent: null, refId: row.dataset.id, where: f < 0.5 ? 'before' : 'after', row };
+    }
+    // in a gap or below everything: after the last row's top-level entry
+    let lastBefore = null;
+    rows.forEach((row) => { if (row.getBoundingClientRect().bottom <= y) lastBefore = row; });
+    return topLevelTarget(lastBefore || rows[rows.length - 1], 'after', rows);
+  }
+
+  function lastRowOf(rows, groupId) {
+    let last = null;
+    rows.forEach((r) => { if (r.dataset.group === groupId) last = r; });
+    return last;
+  }
+
+  // a target beside the top-level entry a row belongs to
+  function topLevelTarget(row, where, rows) {
+    if (row.dataset.kind === 'child') {
+      const groupId = row.dataset.group;
+      const anchor = where === 'after' && rows ? lastRowOf(rows, groupId) : row;
+      return { parent: null, refId: groupId, where, row: anchor || row };
+    }
+    if (row.dataset.kind === 'group' && where === 'after' && rows) {
+      return { parent: null, refId: row.dataset.id, where, row: lastRowOf(rows, row.dataset.id) || row };
+    }
+    return { parent: null, refId: row.dataset.id, where, row };
+  }
+
+  // the stacking order (bottom to top) and group map a drop would produce
+  function arrangementFor(drag, target) {
+    const entries = layerEntries(drag.original).map((e) => (e.type === 'group'
+      ? { type: 'group', id: e.id, members: e.members.map((o) => o.id) }
+      : { type: 'object', id: e.id }));
+    let moving;
+    if (drag.kind === 'group') {
+      const i = entries.findIndex((e) => e.type === 'group' && e.id === drag.id);
+      if (i === -1) return null;
+      moving = entries.splice(i, 1)[0];
+      if (target.parent) return null; // groups never go inside groups
+    } else {
+      moving = { type: 'object', id: drag.id };
+      const top = entries.findIndex((e) => e.type === 'object' && e.id === drag.id);
+      if (top !== -1) entries.splice(top, 1);
+      else entries.forEach((e) => { if (e.type === 'group') e.members = e.members.filter((id) => id !== drag.id); });
+    }
+
+    let toGroup = null;
+    if (target.parent) {
+      const group = entries.find((e) => e.type === 'group' && e.id === target.parent);
+      if (!group) return null;
+      toGroup = group.id;
+      if (target.where === 'inside') group.members.unshift(moving.id);
+      else {
+        let k = group.members.indexOf(target.refId);
+        if (k === -1) k = 0;
+        group.members.splice(target.where === 'after' ? k + 1 : k, 0, moving.id);
+      }
+    } else {
+      let k = entries.findIndex((e) => e.id === target.refId);
+      if (k === -1) k = target.where === 'after' ? entries.length - 1 : 0;
+      entries.splice(target.where === 'after' ? k + 1 : k, 0, moving);
+    }
+
+    const topDown = [];
+    const groupOf = new Map();
+    entries.forEach((e) => {
+      if (e.type === 'group') {
+        e.members.forEach((id) => { topDown.push(id); groupOf.set(id, e.id); });
+      } else {
+        topDown.push(e.id);
+        groupOf.set(e.id, null);
+      }
+    });
+    let label = 'reorder';
+    if (drag.kind === 'object' && toGroup !== drag.fromGroup) {
+      label = !drag.fromGroup ? 'into group' : !toGroup ? 'out of group' : 'between groups';
+    }
+    return { order: topDown.reverse(), groupOf, label };
+  }
+
+  // the live preview: the canvas shows the arrangement under the finger
+  function updateLayerDrag() {
+    const drag = layers.drag;
+    const target = layerDropTarget(drag);
+    drag.target = target;
+    dom.layersList.querySelectorAll('.is-drop-target').forEach((r) => r.classList.remove('is-drop-target'));
+    const indicator = dom.layersIndicator;
+    if (!target) {
+      indicator.hidden = true;
+      doc.objects = drag.original;
+      requestRender();
+      return;
+    }
+    if (target.where === 'inside') {
+      indicator.hidden = true;
+      target.row.classList.add('is-drop-target');
+    } else {
+      const row = target.row;
+      const depth = target.parent ? 1 : 0;
+      indicator.hidden = false;
+      indicator.style.top = (row.offsetTop + (target.where === 'after' ? row.offsetHeight : 0)) + 'px';
+      indicator.style.left = (14 + depth * 18) + 'px';
+    }
+    // the op is measured against the original order, then previewed
+    doc.objects = drag.original;
+    const result = arrangementFor(drag, target);
+    const op = result && arrangementOp(result.order, result.groupOf, result.label);
+    if (op) {
+      const preview = { canvas: doc.canvas, objects: drag.original, undo: [], redo: [] };
+      H.operations.arrange.apply(preview, op);
+      doc.objects = preview.objects;
+    }
+    requestRender();
+  }
+
+
   /* 8. modes
      ------------------------------------------------------------------------
      idle: taps select (see 7b). place: each tap places the current
@@ -1027,7 +1893,7 @@
   // 🧹 is dimmed when there is nothing to delete
   function updateClearButton() {
     if (mode === 'delete') {
-      dom.dropButton.setAttribute('aria-disabled', String(doc.objects.length === 0));
+      dom.dropButton.setAttribute('aria-disabled', String(!doc.objects.some(isSelectable)));
     }
   }
 
@@ -1305,6 +2171,8 @@
     } else if (closing === 'canvas') {
       hideAnimated(dom.canvasPanel);
       dom.canvasLabel.setAttribute('aria-expanded', 'false');
+      // a color still being previewed from the wheel is kept, as one step
+      if (backgroundPreview) setBackground(backgroundPreview);
     }
     return true;
   }
@@ -1370,6 +2238,9 @@
       case 'redo':
         redo();
         break;
+      case 'layers':
+        toggleLayersPanel();
+        break;
       case 'recenter':
         recenterView();
         break;
@@ -1415,8 +2286,45 @@
     dom.canvasPanel.style.top = Math.round(y) + 'px';
   }
 
+  // background color: a swatch applies at once (one undo step); the color
+  // wheel previews live while you pick and records one step when you're done
+  let backgroundPreview = null;
+
+  function setBackground(color) {
+    backgroundPreview = null;
+    const from = doc.canvas.background;
+    const to = color.toUpperCase();
+    if (!/^#[0-9A-F]{6}$/.test(to) || from.toUpperCase() === to) {
+      requestRender();
+      return;
+    }
+    commit({ type: 'set-background', from, to });
+  }
+
+  function onColorClick(event) {
+    // no caption here: the ring on the chosen swatch is the feedback
+    const swatch = event.target.closest('[data-color]');
+    if (swatch) setBackground(swatch.dataset.color);
+  }
+
+  function onColorInput() {
+    backgroundPreview = dom.colorInput.value;
+    requestRender();
+  }
+
+  function onColorChange() {
+    setBackground(dom.colorInput.value);
+  }
+
   function syncCanvasPanel() {
     const { width, height } = doc.canvas;
+    const background = doc.canvas.background.toUpperCase();
+    dom.swatches.forEach((swatch) => {
+      swatch.setAttribute('aria-pressed', String(swatch.dataset.color === background));
+    });
+    const custom = !dom.swatches.some((swatch) => swatch.dataset.color === background);
+    dom.colorWheel.setAttribute('aria-pressed', String(custom));
+    if (!backgroundPreview) dom.colorInput.value = background.toLowerCase();
     if (document.activeElement !== dom.widthInput) dom.widthInput.value = width;
     if (document.activeElement !== dom.heightInput) dom.heightInput.value = height;
     dom.ratioButtons.forEach((button) => {
@@ -1658,6 +2566,7 @@
     ctx.fillRect(0, 0, width, height);
 
     for (const object of doc.objects) {
+      if (object.hidden) continue; // hidden layers never export
       const cx = object.x + width / 2;
       const cy = object.y + height / 2;
       const reach = object.size; // generous bound, covers rotation
@@ -1780,6 +2689,7 @@
 
     cancelViewAnimation();
     measureStage();
+    noteInputType(event.pointerType);
     const p = stagePoint(event);
     const first = pointers.size === 0;
     pointers.set(event.pointerId, { x: p.x, y: p.y, startX: p.x, startY: p.y, downAt: performance.now() });
@@ -1804,6 +2714,8 @@
 
       if (timeline.open || event.button === 1 || closed) {
         gesture.kind = 'navigate';
+        // a plain tap outside the open timeline closes it (drags still pan)
+        gesture.closesTimeline = timeline.open && !closed;
         return;
       }
       if (mode !== 'idle') {
@@ -1831,6 +2743,7 @@
 
     if (!gesture) return;
     cancelLongPress();
+    gesture.closesTimeline = false; // two fingers zoom; never a closing tap
 
     // a resting first finger on empty space + taps with another finger
     // builds a multiple selection
@@ -1882,6 +2795,20 @@
 
     switch (gesture.kind) {
       case 'press-object':
+        // an emoji that is already selected moves at once, without a long
+        // press; the press never changes the selection, so a lower emoji
+        // reached by cycling stays the one that moves
+        if (isPrimary && moved) {
+          cancelLongPress();
+          // (editing stays as it was, so later taps still cycle overlaps)
+          if (!gesture.shift && gesture.hits.some((o) => selection.ids.has(o.id)) && beginTransform()) {
+            gesture.kind = 'drag';
+            dragTo(pointer);
+          } else {
+            gesture.kind = gesture.mouse ? 'pan' : 'idle-move';
+          }
+        }
+        break;
       case 'press-empty':
       case 'mode-tap':
         if (isPrimary && moved) {
@@ -2000,6 +2927,9 @@
       event.pointerId === gesture.primaryId && !movedBeyondSlop(pointer);
 
     switch (gesture.kind) {
+      case 'navigate':
+        if (tap && gesture.closesTimeline && timeline.open) closeTimeline();
+        break;
       case 'mode-tap':
         if (tap) handleModeTap(p.x, p.y);
         break;
@@ -2100,6 +3030,10 @@
 
   function onKeyDown(event) {
     if (event.key !== 'Escape') return;
+    if (layers.drag) {
+      cancelLayerDrag();
+      return;
+    }
     if (timeline.open) {
       if (timeline.branchesOpen) closeBranches();
       else closeTimeline();
@@ -2107,6 +3041,7 @@
     }
     if (closePanel()) return;
     if (closeObjectMenu()) return;
+    if (closeLayersPanel()) return;
     if (mode !== 'idle') {
       setMode('idle');
       return;
@@ -2128,6 +3063,12 @@
       document.addEventListener(type, (event) => event.preventDefault(), { passive: false });
     });
     dom.stage.addEventListener('contextmenu', (event) => event.preventDefault());
+    // long presses and drags never select text anywhere (fields excepted)
+    document.addEventListener('selectstart', (event) => {
+      const target = event.target;
+      const field = target && target.closest && target.closest('input, textarea');
+      if (!field) event.preventDefault();
+    });
     // a ctrl+wheel (trackpad pinch) over the interface must never zoom the page
     window.addEventListener('wheel', (event) => {
       if (event.ctrlKey) event.preventDefault();
@@ -2347,6 +3288,8 @@
     dom.timeline.dataset.open = 'false';
     dom.timelineToggle.setAttribute('aria-expanded', 'false');
     dom.timelinePanel.inert = true;
+    disarmReset();
+    refreshClosedTimeline(false);
 
     const saved = timeline.saved;
     timeline.saved = null;
@@ -2398,17 +3341,23 @@
         return op.label === 'duplicate' ? 'duplicate' : 'add';
       case 'delete-object':
       case 'delete-objects':
-        return 'delete';
+        return op.label === 'delete all' ? 'delete all' : 'delete';
       case 'clear-objects':
         return 'delete all';
       case 'resize-canvas':
         return 'canvas size';
+      case 'set-background':
+        return 'background';
       case 'transform-objects':
         return op.label || 'move';
       case 'set-groups':
         return op.label || 'group';
       case 'reorder':
         return { front: 'to front', back: 'to back', forward: 'forward', backward: 'backward' }[op.label] || 'reorder';
+      case 'arrange':
+        return op.label || 'layers';
+      case 'set-flags':
+        return op.label || 'layer';
       default:
         return op.type;
     }
@@ -2462,13 +3411,19 @@
     ctx.clearRect(0, 0, width, height);
     const total = timeline.total;
     if (!total) return;
-    const spacing = width / total;
-    if (spacing >= 3) {
-      timeline.events.forEach((event, i) => {
-        const x = Math.round((i + 1) * spacing) - 0.5;
-        ctx.fillStyle = event.type === 'op' ? 'rgba(29, 29, 31, 0.22)' : 'rgba(245, 160, 0, 0.75)';
-        ctx.fillRect(x, height / 2 - 4, 1, 8);
-      });
+    // one tick per event while they fit (3px apart); after that each tick
+    // stands for a few neighboring events, so the strip keeps showing work
+    const bins = Math.max(1, Math.min(total, Math.floor(width / 3)));
+    for (let b = 0; b < bins; b += 1) {
+      const first = Math.floor((b * total) / bins);
+      const last = Math.floor(((b + 1) * total) / bins);
+      let undoRedo = false;
+      for (let i = first; i < last; i += 1) {
+        if (timeline.events[i].type !== 'op') undoRedo = true;
+      }
+      const x = Math.round((last / total) * width) - 0.5;
+      ctx.fillStyle = undoRedo ? 'rgba(245, 160, 0, 0.75)' : 'rgba(29, 29, 31, 0.22)';
+      ctx.fillRect(x, height / 2 - 4, 1, 8);
     }
     H.branchPoints(project, project.activeId).forEach((point) => {
       const x = (point / total) * width;
@@ -2480,29 +3435,37 @@
   }
 
   // scrubbing: pointer on the rail moves the playhead; state appears at once
+  // the closed strip works the same way: touching it opens the timeline at
+  // that moment. after the first touch the playhead follows the finger's
+  // movement (not its absolute position), so it never jumps while the
+  // strip widens into the open timeline.
   function setupScrubber() {
-    const indexAt = (clientX) => {
-      const rect = dom.timelineScrubber.getBoundingClientRect();
-      const fraction = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-      return Math.round(fraction * timeline.total);
-    };
-    let dragging = false;
+    const clamp = (f) => Math.min(1, Math.max(0, f));
+    let drag = null;
     dom.timelineScrubber.addEventListener('pointerdown', (event) => {
       if (!timeline.total) return;
-      dragging = true;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
       try { dom.timelineScrubber.setPointerCapture(event.pointerId); } catch (e) { /* synthetic */ }
-      scrubTo(indexAt(event.clientX));
+      const rect = dom.timelineScrubber.getBoundingClientRect();
+      const fraction = clamp((event.clientX - rect.left) / rect.width);
+      drag = { id: event.pointerId, x: event.clientX, fraction };
+      if (!timeline.open) openTimeline();
+      scrubTo(Math.round(fraction * timeline.total));
     });
     dom.timelineScrubber.addEventListener('pointermove', (event) => {
-      if (!dragging) return;
-      const k = indexAt(event.clientX);
+      if (!drag || event.pointerId !== drag.id) return;
+      const width = dom.timelineScrubber.getBoundingClientRect().width || 1;
+      const fraction = clamp(drag.fraction + (event.clientX - drag.x) / width);
+      const k = Math.round(fraction * timeline.total);
       if (k !== timeline.index) scrubTo(k);
     });
-    const stop = () => { dragging = false; };
+    const stop = () => { drag = null; };
     dom.timelineScrubber.addEventListener('pointerup', stop);
     dom.timelineScrubber.addEventListener('pointercancel', stop);
     dom.timelineScrubber.addEventListener('keydown', (event) => {
       const step = { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1 }[event.key];
+      const known = step || event.key === 'Home' || event.key === 'End';
+      if (known && timeline.total && !timeline.open) openTimeline();
       if (step) {
         event.preventDefault();
         scrubTo(timeline.index + step);
@@ -2584,6 +3547,64 @@
       renderTimelineUi();
       requestRender();
     }
+  }
+
+  // while closed, the strip follows the work: a new tick for every change
+  function refreshClosedTimeline(bump) {
+    if (timeline.open || !dom.timeline) return;
+    const before = timeline.total;
+    refreshTimelineData();
+    timeline.index = timeline.total;
+    timeline.position = timeline.total;
+    renderTimelineUi();
+    drawTimelineTicks();
+    if (bump && timeline.total !== before) {
+      const knob = dom.timelineKnob;
+      knob.classList.remove('is-bumped');
+      void knob.offsetWidth; // restart the animation
+      knob.classList.add('is-bumped');
+    }
+  }
+
+  // reset: the current artwork becomes the new starting point; every step
+  // and every branch is erased. asks once more before it happens.
+  function resetTimeline() {
+    if (!timeline.resetArmed) {
+      timeline.resetArmed = true;
+      dom.resetButton.dataset.confirm = 'true';
+      dom.resetButton.textContent = 'sure?';
+      showTimelineMessage('tap again to erase all steps and branches. the artwork stays');
+      clearTimeout(timeline.resetTimer);
+      timeline.resetTimer = setTimeout(disarmReset, 4200);
+      return;
+    }
+    disarmReset();
+    stopPlayback(false);
+    closeBranches();
+    const canvas = { ...doc.canvas };
+    const objects = doc.objects.slice();
+    project = H.createProject({ canvas, objects });
+    setLiveState(H.latestState(project, project.activeId));
+    if (timeline.saved) {
+      const existing = new Set(objects.map((o) => o.id));
+      timeline.saved.ids = timeline.saved.ids.filter((id) => existing.has(id));
+    }
+    refreshTimelineData();
+    showStateAt(timeline.total);
+    drawTimelineTicks();
+    updateHistoryButtons();
+    syncCanvasPanel();
+    saveNeeded = true;
+    saveNow();
+    showTimelineMessage('timeline reset');
+  }
+
+  function disarmReset() {
+    clearTimeout(timeline.resetTimer);
+    timeline.resetArmed = false;
+    if (!dom.resetButton) return;
+    delete dom.resetButton.dataset.confirm;
+    dom.resetButton.textContent = 'reset';
   }
 
   function showTimelineMessage(text) {
@@ -2792,7 +3813,10 @@
     } else if (action === 'branches') {
       if (timeline.branchesOpen) closeBranches();
       else openBranches();
+    } else if (action === 'reset') {
+      resetTimeline();
     }
+    if (action !== 'reset') disarmReset();
   }
 
 
@@ -2876,6 +3900,14 @@
     dom.workspace = $('.workspace');
     dom.stage = $('.stage');
     dom.canvasLabel = $('.canvas-label');
+    dom.layers = $('.layers');
+    dom.layersTool = $('[data-tool="layers"]');
+    dom.layersList = $('.layers__list');
+    dom.layersScroll = $('.layers__scroll');
+    dom.layersCount = $('.layers__count');
+    dom.layersIndicator = $('.layers__indicator');
+    dom.layersClose = $('.layers__close');
+    dom.canvasLabelText = $('.canvas-label__text');
     dom.settingsBar = $('.control-bar--settings');
     dom.toolsBar = $('.control-bar--tools');
     dom.timelineBar = $('.control-bar--timeline');
@@ -2903,6 +3935,7 @@
     dom.timelineFill = $('.timeline__fill');
     dom.timelineKnob = $('.timeline__knob');
     dom.timelineControls = $('.timeline__controls');
+    dom.resetButton = $('.timeline__reset');
     dom.playButton = $('[data-timeline="play"]');
     dom.speedButton = $('[data-timeline="speed"]');
     dom.branchHereButton = $('[data-timeline="branch"]');
@@ -2918,6 +3951,10 @@
     dom.widthInput = $('.canvas-panel__size [name="width"]');
     dom.heightInput = $('.canvas-panel__size [name="height"]');
     dom.ratioGroup = $('.canvas-panel__ratios');
+    dom.colorGroup = $('.canvas-panel__colors');
+    dom.swatches = [...document.querySelectorAll('.canvas-panel__colors [data-color]')];
+    dom.colorWheel = $('.swatch--wheel');
+    dom.colorInput = $('.swatch__input');
     dom.ratioButtons = [...document.querySelectorAll('.canvas-panel__ratios [data-width]')];
     dom.picker = $('.picker');
     dom.pickerHeader = $('.picker__header');
@@ -2959,10 +3996,23 @@
     dom.branches.addEventListener('click', onBranchesClick);
     dom.branches.addEventListener('keydown', onBranchesKeyDown);
     setupScrubber();
+    // the ticks follow the strip as it widens and narrows
+    if (window.ResizeObserver) new ResizeObserver(() => drawTimelineTicks()).observe(dom.timelineScrubber);
 
     // canvas properties
     dom.canvasLabel.addEventListener('click', openCanvasPanel);
+
+    // layers
+    dom.layersClose.addEventListener('click', closeLayersPanel);
+    dom.layersList.addEventListener('click', onLayersClick);
+    dom.layersList.addEventListener('pointerdown', onLayerGripDown);
+    dom.layersList.addEventListener('pointermove', onLayerGripMove);
+    dom.layersList.addEventListener('pointerup', onLayerGripUp);
+    dom.layersList.addEventListener('pointercancel', onLayerGripUp);
     dom.ratioGroup.addEventListener('click', onRatioClick);
+    dom.colorGroup.addEventListener('click', onColorClick);
+    dom.colorInput.addEventListener('input', onColorInput);
+    dom.colorInput.addEventListener('change', onColorChange);
     dom.canvasSizeForm.addEventListener('submit', onCanvasSizeSubmit);
 
     // picker
@@ -3010,6 +4060,7 @@
     bindEvents();
     resizeStage();
     fitView();
+    refreshClosedTimeline(false);
 
     // the label's height depends on the web font; refit once it has loaded
     // unless the user has already moved the view

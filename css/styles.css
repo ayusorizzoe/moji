@@ -63,7 +63,7 @@
   --control-size: 48px;          /* height of every floating control */
   --tool-size: 44px;             /* touch target of each tool */
   --tools-anchor-width: 60px;    /* chevron + 🛠️ */
-  --tools-count: 6;
+  --tools-count: 7;
   --tools-expanded-width: calc(var(--tools-anchor-width) + var(--tools-count) * var(--tool-size) + var(--space-1));
   --icon-size: 22px;
   --icon-size-small: 14px;
@@ -168,6 +168,18 @@ body {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
+  /* an app, not a page: long presses never select text or open the
+     callout menu (fields below opt back in) */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+input,
+textarea {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
 }
 
 h1,
@@ -582,22 +594,6 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   transform: rotate(180deg);
 }
 
-/* the decorative track of the closed capsule */
-.timeline__track {
-  position: absolute;
-  left: 52px;
-  right: var(--space-4);
-  bottom: calc(var(--timeline-height) / 2 - 1.5px);
-  height: 3px;
-  border-radius: var(--radius-capsule);
-  background: var(--color-fill-pressed);
-  transition: opacity var(--duration-fade) ease;
-}
-
-.timeline[data-open="true"] .timeline__track {
-  opacity: 0;
-}
-
 .timeline__panel {
   position: absolute;
   inset: 0;
@@ -630,13 +626,31 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   text-overflow: ellipsis;
 }
 
-/* the scrubber: a rail with event ticks, a fill, and the playhead */
-.timeline__scrubber {
-  position: relative;
+.timeline__rail-space {
   height: 32px;
-  margin: 0 12px;
+}
+
+/* the scrubber: a rail with event ticks, a fill, and the playhead. it is
+   always visible: in the closed capsule it is a live strip next to ⏳ that
+   gains a tick with every change; open, it rises above the controls. */
+.timeline__scrubber {
+  position: absolute;
+  left: 50px;
+  right: 16px;
+  bottom: calc((var(--timeline-height) - 32px) / 2);
+  height: 32px;
   cursor: pointer;
   touch-action: none;
+  transition:
+    left var(--duration-morph) var(--ease-spring),
+    right var(--duration-morph) var(--ease-spring),
+    bottom var(--duration-morph) var(--ease-spring);
+}
+
+.timeline[data-open="true"] .timeline__scrubber {
+  left: 22px;
+  right: 22px;
+  bottom: calc(var(--timeline-height) + 4px);
 }
 
 .timeline__scrubber::before {
@@ -681,6 +695,35 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   background: var(--color-canvas);
   box-shadow: 0 1px 4px rgba(15, 20, 25, 0.25), 0 0 0 0.5px rgba(29, 29, 31, 0.15);
   pointer-events: none;
+  transition:
+    width var(--duration-morph) var(--ease-spring),
+    height var(--duration-morph) var(--ease-spring),
+    margin var(--duration-morph) var(--ease-spring);
+}
+
+/* closed: a smaller "now" marker at the end of the strip */
+.timeline[data-open="false"] .timeline__knob {
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+}
+
+.timeline[data-open="false"] .timeline__fill {
+  opacity: 0.3;
+}
+
+/* each change gives the marker a small pulse */
+.timeline__knob.is-bumped {
+  animation: timeline-bump 360ms var(--ease-spring);
+}
+
+@keyframes timeline-bump {
+  40% { transform: scale(1.35); }
+}
+
+.timeline__reset[data-confirm="true"] {
+  background: #FF3B30;
+  color: #FFFFFF;
 }
 
 .timeline__scrubber[aria-disabled="true"] {
@@ -726,6 +769,260 @@ body[data-timeline="open"] .canvas-label {
 body[data-timeline="open"] .control-bar--tools > *,
 body[data-timeline="open"] .canvas-label {
   pointer-events: none;
+}
+
+/* while an emoji is being moved, resized or rotated the controls step
+   aside so the artwork has the whole screen */
+.controls {
+  transition: opacity var(--duration-fade) ease;
+}
+
+body[data-transforming="true"] .controls,
+body[data-transforming="true"] .layers {
+  opacity: 0;
+}
+
+body[data-transforming="true"] .layers * {
+  pointer-events: none !important;
+}
+
+body[data-transforming="true"] .controls * {
+  pointer-events: none !important;
+}
+
+/* layers panel: floats on the right under the tools, beside the canvas.
+   compact and scrollable on phones; taller on larger screens. js sets its
+   top and height around the tools and the timeline. */
+.layers {
+  top: 0;
+  right: calc(var(--safe-right, 0px) + var(--edge-offset));
+  width: min(236px, 64vw);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 22px;
+  opacity: 0;
+  transform: translateX(8px) scale(0.98);
+  transform-origin: top right;
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
+}
+
+.layers.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.layers__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 4px 14px;
+}
+
+.layers__title {
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.layers__count {
+  flex: 1 1 auto;
+  font-family: var(--font-family-numeric);
+  font-size: var(--font-size-small);
+  color: var(--color-ink-muted);
+}
+
+.layers__close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-fill-subtle);
+  color: var(--color-ink-muted);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.layers__close .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.layers__scroll {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 0 6px 6px;
+}
+
+.layers__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layers[data-readonly="true"] .layers__list {
+  opacity: 0.6;
+}
+
+.layer-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 40px;
+  padding-left: calc(4px + var(--depth, 0) * 18px);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color var(--duration-fade) ease, opacity var(--duration-fade) ease;
+}
+
+.layer-row[aria-selected="true"] {
+  background: rgba(0, 113, 227, 0.14);
+}
+
+.layer-row.is-dragging {
+  opacity: 0.4;
+}
+
+.layer-row.is-drop-target {
+  background: rgba(0, 113, 227, 0.22);
+  box-shadow: inset 0 0 0 1.5px rgba(0, 113, 227, 0.8);
+}
+
+.layer-row__expand {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink-muted);
+  cursor: pointer;
+}
+
+.layer-row__expand .icon {
+  width: 14px;
+  height: 14px;
+  transition: transform var(--duration-morph) var(--ease-spring);
+}
+
+.layer-row[aria-expanded="true"] .layer-row__expand .icon {
+  transform: rotate(90deg);
+}
+
+.layer-row__spacer {
+  flex: none;
+  width: 20px;
+}
+
+.layer-row__thumb {
+  flex: none;
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-family-emoji);
+  font-size: 22px;
+  line-height: 1;
+}
+
+/* a group shows up to three of its emoji, fanned */
+.layer-row__thumb--group span {
+  position: absolute;
+  font-size: 15px;
+}
+
+.layer-row__thumb--group span:nth-child(1) { left: 0; top: 2px; }
+.layer-row__thumb--group span:nth-child(2) { left: 8px; top: 9px; }
+.layer-row__thumb--group span:nth-child(3) { left: 14px; top: 0; }
+
+.layer-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 6px;
+  font-size: var(--font-size-small);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.layer-row[data-hidden="true"] .layer-row__thumb,
+.layer-row[data-hidden="true"] .layer-row__name {
+  opacity: 0.35;
+}
+
+.layer-row__toggle,
+.layer-row__grip {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 30px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.layer-row__toggle .icon {
+  width: 17px;
+  height: 17px;
+  opacity: 0.28;
+  transition: opacity var(--duration-fade) ease;
+}
+
+/* the state that differs from normal is the one that shows clearly */
+.layer-row__toggle[aria-pressed="true"] .icon {
+  opacity: 0.9;
+}
+
+.layer-row__grip {
+  width: 26px;
+  color: var(--color-ink-muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.layer-row__grip .icon {
+  width: 16px;
+  height: 16px;
+}
+
+.layers[data-readonly="true"] .layer-row__grip,
+.layers[data-readonly="true"] .layer-row__toggle {
+  pointer-events: none;
+}
+
+.layers__empty {
+  padding: 10px 10px 12px;
+  font-size: var(--font-size-small);
+  color: var(--color-ink-muted);
+}
+
+/* where a dragged layer will land */
+.layers__indicator {
+  position: absolute;
+  right: 8px;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: var(--radius-capsule);
+  background: var(--color-focus);
+  pointer-events: none;
+}
+
+body[data-layer-drag="true"] {
+  cursor: grabbing;
 }
 
 /* the branch list rises just above the timeline */
@@ -881,30 +1178,89 @@ body[data-timeline="open"] .canvas-label {
   transform: none;
 }
 
+/* one continuous glass surface: each row centers whatever actions apply,
+   so fewer actions simply make a shorter row (no empty slots) */
 .object-menu__row {
   display: flex;
+  justify-content: center;
   gap: 2px;
 }
 
+.object-menu__row:not([hidden]) + .object-menu__row:not([hidden]) {
+  padding-top: 2px;
+  border-top: 0.5px solid var(--color-separator);
+}
+
+/* an emoji icon with a small label underneath; no borders or fills of its
+   own until pressed */
 .menu-button {
-  flex: 1 1 auto;
-  height: 40px;
-  padding: 0 12px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 64px;
+  height: 58px;
+  padding: 4px 2px 5px;
   border: 0;
   border-radius: 16px;
   background: transparent;
-  font-size: var(--font-size-small);
-  font-weight: var(--font-weight-bold);
   color: var(--color-ink);
-  white-space: nowrap;
   cursor: pointer;
   touch-action: manipulation;
   transition: background-color var(--duration-fade) ease, transform var(--duration-press) var(--ease-out);
 }
 
+.menu-button[hidden] {
+  display: none;
+}
+
+.menu-button__icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 26px;
+  font-family: var(--font-family-emoji);
+  font-size: 23px;
+  line-height: 1;
+}
+
+/* duplicate: two blue squares, the front one lower and to the right */
+.menu-button__icon--duplicate span {
+  position: absolute;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.menu-button__icon--duplicate span:first-child {
+  left: 1px;
+  top: 0;
+  opacity: 0.75;
+}
+
+.menu-button__icon--duplicate span:last-child {
+  left: 8px;
+  top: 7px;
+}
+
+.menu-button__label {
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+  line-height: 1.1;
+  color: var(--color-ink-muted);
+  white-space: nowrap;
+}
+
 .menu-button:active {
   background: var(--color-fill);
-  transform: scale(0.95);
+  transform: scale(0.94);
+}
+
+.menu-button:focus-visible {
+  outline-offset: -2px;
 }
 
 @media (hover: hover) {
@@ -917,13 +1273,19 @@ body[data-timeline="open"] .canvas-label {
 /* 10. canvas label and canvas properties
    ========================================================================== */
 
-/* positioned by js at the canvas's upper-left edge, in screen space */
+/* positioned by js at the canvas's upper-left edge, in screen space. when
+   the canvas reaches up behind the top controls there is no room above it,
+   so the label morphs into a round button beside ⚙️ showing a miniature
+   of the canvas (its shape and background color). */
 .canvas-label {
   position: absolute;
   top: 0;
   left: 0;
+  display: grid;
+  place-items: center;
   height: var(--label-height);
-  padding: 0 var(--space-3);
+  padding: 0;
+  border-radius: calc(var(--label-height) / 2);
   font-size: var(--font-size-small);
   font-weight: var(--font-weight-bold);
   letter-spacing: var(--letter-spacing-label);
@@ -934,14 +1296,73 @@ body[data-timeline="open"] .canvas-label {
   touch-action: manipulation;
   white-space: nowrap;
   will-change: transform;
-  transition: background-color var(--duration-fade) ease, opacity var(--duration-fade) ease;
+  transition:
+    background-color var(--duration-fade) ease,
+    opacity var(--duration-fade) ease,
+    width var(--duration-morph) var(--ease-spring),
+    height var(--duration-morph) var(--ease-spring),
+    border-radius var(--duration-morph) var(--ease-spring);
 }
 
-/* extend the touch target without enlarging the label */
+/* only while switching between the two places does the position animate;
+   otherwise the label follows the canvas exactly */
+.canvas-label.is-morphing {
+  transition:
+    background-color var(--duration-fade) ease,
+    opacity var(--duration-fade) ease,
+    width var(--duration-morph) var(--ease-spring),
+    height var(--duration-morph) var(--ease-spring),
+    border-radius var(--duration-morph) var(--ease-spring),
+    transform var(--duration-morph) var(--ease-spring);
+}
+
+.canvas-label > span {
+  grid-area: 1 / 1;
+  transition:
+    opacity var(--duration-fade) ease,
+    transform var(--duration-morph) var(--ease-spring);
+}
+
+.canvas-label__icon {
+  width: var(--mini-w, 13px);
+  height: var(--mini-h, 22px);
+  border-radius: 3px;
+  background: var(--mini-bg, #000000);
+  box-shadow: 0 0 0 1.5px rgba(29, 29, 31, 0.55), 0 1px 2px rgba(15, 20, 25, 0.2);
+  opacity: 0;
+  transform: scale(0.4);
+}
+
+.canvas-label[data-inside="true"] {
+  height: var(--control-size);
+  border-radius: calc(var(--control-size) / 2);
+}
+
+.canvas-label[data-inside="true"] .canvas-label__text {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+.canvas-label[data-inside="true"] .canvas-label__icon {
+  opacity: 1;
+  transform: none;
+}
+
+/* extend the touch target of the small label without enlarging it */
 .canvas-label::after {
   content: "";
   position: absolute;
   inset: -7px -4px;
+}
+
+.canvas-label[data-inside="true"]::after {
+  inset: 0;
+}
+
+/* beside ⚙️ it steps aside with ⚙️ when the expanded tools need the corner */
+body[data-tools-cover="true"] .canvas-label[data-inside="true"] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .canvas-label[aria-expanded="true"] {
@@ -1010,6 +1431,59 @@ body[data-timeline="open"] .canvas-label {
   color: var(--color-ink);
   font-weight: var(--font-weight-bold);
   box-shadow: 0 1px 3px rgba(15, 20, 25, 0.1), 0 0 0 0.5px rgba(29, 29, 31, 0.06);
+}
+
+/* background colors: simple swatches and a color wheel for anything else */
+.canvas-panel__colors {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  justify-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+}
+
+.swatch {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: inset 0 0 0 1px rgba(29, 29, 31, 0.14);
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: transform var(--duration-press) ease, box-shadow var(--duration-fade) ease;
+}
+
+.swatch:active {
+  transform: scale(0.9);
+}
+
+/* the chosen color gets a ring with a gap, like a selected story color */
+.swatch[aria-pressed="true"] {
+  box-shadow:
+    inset 0 0 0 1px rgba(29, 29, 31, 0.14),
+    0 0 0 2.5px var(--color-canvas),
+    0 0 0 4.5px var(--color-ink);
+}
+
+.swatch--wheel {
+  display: block;
+  background: conic-gradient(#FF3B30, #FFCC00, #34C759, #5AC8FA, #007AFF, #AF52DE, #FF2D55, #FF3B30);
+  overflow: visible;
+}
+
+.swatch__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  opacity: 0;
+  cursor: pointer;
 }
 
 .canvas-panel__size {
@@ -1417,6 +1891,14 @@ body[data-timeline="open"] .canvas-label {
 /* 13. responsive adjustments
    ========================================================================== */
 
+/* narrow phones: seven tools plus 🛠️ still fit in one row */
+@media (max-width: 399px) {
+  :root {
+    --tool-size: 41px;
+    --tools-anchor-width: 54px;
+  }
+}
+
 @media (min-width: 600px) {
   :root {
     --edge-offset: var(--space-4);
@@ -1499,6 +1981,7 @@ input:focus-visible {
   .tools__row .tool-button,
   .tools-drop .tool-button,
   .object-menu,
+  .layers,
   .branches,
   .caption,
   .canvas-panel,
@@ -1511,6 +1994,9 @@ input:focus-visible {
     opacity: 0;
   }
 
+  .timeline__knob.is-bumped {
+    animation: none;
+  }
 }
 
 /* windows high contrast / forced colors */
@@ -1520,12 +2006,23 @@ input:focus-visible {
     border: 1px solid ButtonText;
   }
 
-  .timeline__track {
+  .timeline__scrubber::before {
     background: ButtonText;
   }
 
   .tools-shape__edge path {
     stroke: ButtonText;
     stroke-width: 1;
+  }
+}
+
+/* larger screens: a roomier layers panel for bigger compositions */
+@media (min-width: 600px) {
+  .layers {
+    width: 280px;
+  }
+
+  .layer-row {
+    height: 42px;
   }
 }
