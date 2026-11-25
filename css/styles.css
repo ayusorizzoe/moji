@@ -23,6 +23,9 @@
   --color-fill-pressed: rgba(29, 29, 31, 0.13);
   --color-separator: rgba(29, 29, 31, 0.08);
   --color-focus: #0071E3;
+  --color-accent: #FFD43B;       /* warm emoji yellow for primary actions */
+  --color-accent-pressed: #F5C518;
+  --color-on-accent: #1D1D1F;
 
   /* glass material */
   --glass-fill: rgba(250, 250, 252, 0.7);
@@ -67,6 +70,7 @@
   --icon-stroke: 2;
   --label-height: 30px;
   --timeline-height: 44px;
+  --timeline-open-height: 128px;
   --timeline-width: min(232px, calc(100vw - 2 * var(--edge-offset) - 2 * var(--control-size) - 2 * var(--space-5)));
 
   /* sheets */
@@ -109,6 +113,9 @@
 :root {
   --font-family: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-family-emoji: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", sans-serif;
+  /* numbers typed into fields: the system's rounded face where available
+     (sf rounded on apple devices), otherwise the system ui face */
+  --font-family-numeric: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   --font-size-small: 0.875rem;  /* 14px */
   --font-size-base: 1rem;       /* 16px */
@@ -266,8 +273,7 @@ body[data-mode="delete"] .stage {
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
-.control-button,
-.timeline {
+.control-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -307,9 +313,8 @@ body[data-mode="delete"] .stage {
   background: var(--color-fill);
 }
 
-.tool-button[aria-pressed="true"] {
-  background: var(--color-fill-pressed);
-}
+/* toggles carry aria-pressed for assistive tech but no lasting circle;
+   an active mode is shown in the mode bar instead */
 
 .tool-button[aria-disabled="true"] {
   opacity: 0.3;
@@ -326,9 +331,6 @@ body[data-mode="delete"] .stage {
     background: var(--color-fill-subtle);
   }
 
-  .tool-button[aria-pressed="true"]:hover {
-    background: var(--color-fill-pressed);
-  }
 }
 
 .icon {
@@ -392,17 +394,56 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   right: calc(var(--safe-right) + var(--edge-offset));
 }
 
-/* the glass capsule morphs between its collapsed and expanded widths */
+/* holds the tool buttons; its width is animated by js together with the
+   glass shape behind it */
 .tools {
   position: relative;
+  z-index: 1;
   width: var(--tools-anchor-width);
   height: var(--control-size);
   overflow: hidden;
-  transition: width var(--duration-morph) var(--ease-spring);
+  border-radius: var(--radius-capsule);
 }
 
-.tools[data-expanded="true"] {
-  width: var(--tools-expanded-width);
+/* one continuous glass outline for the panel and its drop-down tab.
+   js writes the same path into the glass clip, the shadow and the edge. */
+.tools-shape {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: var(--tools-anchor-width);
+  height: calc(var(--control-size) + var(--tool-size) + 10px);
+  pointer-events: none;
+}
+
+.tools-shape__glass,
+.tools-shape__shadow,
+.tools-shape__edge {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.tools-shape__glass {
+  background: var(--glass-fill);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
+.tools-shape__shadow-soft {
+  fill: rgba(15, 20, 25, 0.1);
+}
+
+.tools-shape__shadow-tight {
+  fill: rgba(15, 20, 25, 0.06);
+}
+
+.tools-shape__edge path {
+  fill: none;
+  stroke: rgba(29, 29, 31, 0.1);
+  stroke-width: 0.75;
 }
 
 /* the anchor (chevron + 🛠️) is pinned to the right edge and never moves */
@@ -481,32 +522,395 @@ body[data-tools-cover="true"] .control-bar--settings > * {
 }
 
 
-/* 9. timeline control (bottom center)
+/* 9. timeline (bottom center)
    ========================================================================== */
 
 .control-bar--timeline {
   left: 50%;
   bottom: calc(var(--safe-bottom) + var(--edge-offset));
   transform: translateX(-50%);
+  z-index: 2;
 }
 
+/* a capsule that grows upward into the timeline panel; ⏳ stays at its
+   lower left corner */
 .timeline {
+  position: relative;
   width: var(--timeline-width);
   height: var(--timeline-height);
-  gap: var(--space-3);
-  padding: 0 var(--space-4) 0 var(--space-3);
+  overflow: hidden;
+  border-radius: 22px;
   color: var(--color-ink-muted);
+  transition:
+    width var(--duration-morph) var(--ease-spring),
+    height var(--duration-morph) var(--ease-spring),
+    border-radius var(--duration-morph) var(--ease-spring);
+}
+
+.timeline[data-open="true"] {
+  width: min(520px, calc(100vw - 2 * var(--edge-offset)));
+  height: var(--timeline-open-height);
+  border-radius: 26px;
+  background: var(--glass-fill-strong);
+}
+
+.timeline__toggle {
+  position: absolute;
+  left: 2px;
+  bottom: 0;
+  width: var(--timeline-height);
+  height: var(--timeline-height);
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: transparent;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
 .timeline .emoji-icon {
   font-size: 20px;
 }
 
+.timeline__toggle .emoji-icon {
+  transition: transform var(--duration-morph) var(--ease-spring);
+}
+
+.timeline[data-open="true"] .timeline__toggle .emoji-icon {
+  transform: rotate(180deg);
+}
+
+/* the decorative track of the closed capsule */
 .timeline__track {
-  flex: 1 1 auto;
+  position: absolute;
+  left: 52px;
+  right: var(--space-4);
+  bottom: calc(var(--timeline-height) / 2 - 1.5px);
   height: 3px;
   border-radius: var(--radius-capsule);
   background: var(--color-fill-pressed);
+  transition: opacity var(--duration-fade) ease;
+}
+
+.timeline[data-open="true"] .timeline__track {
+  opacity: 0;
+}
+
+.timeline__panel {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto auto var(--timeline-height);
+  align-content: end;
+  gap: 4px;
+  padding: 10px 10px 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-fade) ease;
+}
+
+.timeline[data-open="true"] .timeline__panel {
+  opacity: 1;
+  pointer-events: auto;
+  transition-delay: 80ms;
+}
+
+.timeline__status {
+  min-height: 1.3em;
+  padding: 0 6px;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+  line-height: var(--line-height-tight);
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* the scrubber: a rail with event ticks, a fill, and the playhead */
+.timeline__scrubber {
+  position: relative;
+  height: 32px;
+  margin: 0 12px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.timeline__scrubber::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: var(--radius-capsule);
+  background: var(--color-fill-pressed);
+}
+
+.timeline__ticks {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.timeline__fill {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: var(--radius-capsule);
+  background: var(--color-ink);
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.timeline__knob {
+  position: absolute;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: var(--color-canvas);
+  box-shadow: 0 1px 4px rgba(15, 20, 25, 0.25), 0 0 0 0.5px rgba(29, 29, 31, 0.15);
+  pointer-events: none;
+}
+
+.timeline__scrubber[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.timeline__controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-left: calc(var(--timeline-height) + 2px);
+}
+
+.timeline__speed {
+  min-width: 44px;
+  height: 36px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  background: var(--color-fill-subtle);
+  font-family: var(--font-family-numeric);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  color: var(--color-ink);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.timeline__spacer {
+  flex: 1 1 auto;
+}
+
+/* while the timeline is open it takes priority: tools and the canvas
+   label rest (dimmed, not interactive) until it closes */
+body[data-timeline="open"] .control-bar--tools,
+body[data-timeline="open"] .canvas-label {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity var(--duration-fade) ease;
+}
+
+body[data-timeline="open"] .control-bar--tools > *,
+body[data-timeline="open"] .canvas-label {
+  pointer-events: none;
+}
+
+/* the branch list rises just above the timeline */
+.branches {
+  left: 0;
+  right: 0;
+  margin: 0 auto;
+  bottom: calc(var(--safe-bottom) + var(--edge-offset) + var(--timeline-open-height) + 8px);
+  width: min(420px, calc(100vw - 2 * var(--edge-offset)));
+  max-height: calc(100dvh - var(--timeline-open-height) - 120px);
+  overflow-y: auto;
+  padding: 8px;
+  opacity: 0;
+  transform: translateY(8px) scale(0.98);
+  transform-origin: bottom center;
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
+}
+
+.branches.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.branches__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 8px 8px;
+}
+
+.branches__title {
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.branches__count {
+  font-family: var(--font-family-numeric);
+  font-size: var(--font-size-small);
+  color: var(--color-ink-muted);
+}
+
+.branches__list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.branch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 48px;
+  padding: 2px 2px 2px 4px;
+  border-radius: var(--radius-inner);
+}
+
+.branch-row[data-active="true"] {
+  background: var(--color-fill-subtle);
+}
+
+.branch-row__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 44px;
+  padding: 0 8px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.branch-row__meta {
+  flex: none;
+  font-size: var(--font-size-small);
+  color: var(--color-ink-muted);
+  padding-right: 4px;
+}
+
+.branch-row__icon .emoji-icon {
+  font-size: 18px;
+}
+
+.branch-row__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 40px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-small);
+  background: var(--color-canvas);
+  box-shadow: inset 0 0 0 1.5px var(--color-focus);
+  font-size: var(--font-size-base); /* 16px prevents ios zoom on focus */
+}
+
+.branch-row__confirm {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-left: 8px;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-ink);
+}
+
+.branch-row__danger,
+.branch-row__plain {
+  flex: none;
+  height: 40px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--radius-capsule);
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  cursor: pointer;
+}
+
+.branch-row__danger {
+  background: #FF3B30;
+  color: #FFFFFF;
+}
+
+.branch-row__plain {
+  background: var(--color-fill);
+  color: var(--color-ink);
+}
+
+
+/* 9b. object menu
+   ========================================================================== */
+
+.object-menu {
+  top: 0;
+  left: 0;
+  display: grid;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 20px;
+  opacity: 0;
+  transform: scale(0.96);
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
+}
+
+.object-menu.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.object-menu__row {
+  display: flex;
+  gap: 2px;
+}
+
+.menu-button {
+  flex: 1 1 auto;
+  height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-ink);
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color var(--duration-fade) ease, transform var(--duration-press) var(--ease-out);
+}
+
+.menu-button:active {
+  background: var(--color-fill);
+  transform: scale(0.95);
+}
+
+@media (hover: hover) {
+  .menu-button:hover {
+    background: var(--color-fill-subtle);
+  }
 }
 
 
@@ -530,7 +934,7 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   touch-action: manipulation;
   white-space: nowrap;
   will-change: transform;
-  transition: background-color var(--duration-fade) ease;
+  transition: background-color var(--duration-fade) ease, opacity var(--duration-fade) ease;
 }
 
 /* extend the touch target without enlarging the label */
@@ -542,6 +946,11 @@ body[data-tools-cover="true"] .control-bar--settings > * {
 
 .canvas-label[aria-expanded="true"] {
   background: var(--glass-fill-strong);
+}
+
+.canvas-label[data-covered="true"] {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .panel {
@@ -635,6 +1044,10 @@ body[data-tools-cover="true"] .control-bar--settings > * {
 }
 
 .dimension__input {
+  font-family: var(--font-family-numeric);
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--color-ink);
   flex: 1 1 auto;
   min-width: 0;
   width: 100%;
@@ -668,44 +1081,86 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   height: 44px;
   padding: 0 16px;
   border: 0;
-  border-radius: var(--radius-inner);
-  background: var(--color-ink);
-  color: var(--color-on-ink);
+  border-radius: var(--radius-capsule);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
   font-size: var(--font-size-small);
   font-weight: var(--font-weight-bold);
+  box-shadow: inset 0 -1.5px 0 rgba(0, 0, 0, 0.08), 0 2px 6px rgba(245, 197, 24, 0.35);
   cursor: pointer;
   touch-action: manipulation;
-  transition: transform var(--duration-press) var(--ease-out);
+  transition: transform var(--duration-press) var(--ease-out), background-color var(--duration-fade) ease;
 }
 
 .apply-button:active {
-  transform: scale(0.95);
+  transform: scale(0.94);
+  background: var(--color-accent-pressed);
 }
 
 
-/* 11. mode bar and toast
+/* 11. tools drop-down, caption, and toast
    ========================================================================== */
 
-.control-bar--mode {
-  right: calc(var(--safe-right) + var(--edge-offset));
-  bottom: calc(var(--safe-bottom) + var(--edge-offset) + var(--timeline-height) + var(--space-3));
+/* the button inside the tab that the glass shape grows down under ➕ while
+   placing (showing the current emoji) or under ➖ while deleting (🧹 delete
+   all). js sets --drop-right so it sits centered under its tool. */
+.tools-drop {
+  position: absolute;
+  z-index: 1;
+  top: var(--control-size);
+  right: var(--drop-right, 0px);
+  width: calc(var(--tool-size) + 8px);
+  height: calc(var(--tool-size) + 6px);
+  display: grid;
+  place-items: start center;
 }
 
-.mode-bar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  animation: rise-in var(--duration-morph) var(--ease-spring);
+.tools-drop .tool-button {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.85);
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
 }
 
-body[data-mode="delete"] .mode-bar__add {
-  display: none;
+.tools-drop.is-open .tool-button {
+  transition-delay: 90ms;
 }
 
-/* keep the mode bar out of the way while the picker is open */
-body[data-panel="picker"] .control-bar--mode {
-  visibility: hidden;
+.tools-drop.is-open .tool-button {
+  opacity: 1;
+  transform: none;
+}
+
+.tools-drop.is-open .tool-button[aria-disabled="true"] {
+  opacity: 0.3;
+}
+
+.tools-drop .tool-button:active {
+  transform: scale(0.9);
+}
+
+/* names the tapped button right next to it, then fades. js sets left/top. */
+.caption {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  padding: 6px 14px;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+  line-height: var(--line-height-tight);
+  color: var(--color-ink);
+  background: var(--glass-fill-strong);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-4px) scale(0.96);
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
+}
+
+.caption.is-open {
+  opacity: 1;
+  transform: none;
 }
 
 .control-bar--toast {
@@ -734,13 +1189,6 @@ body[data-panel="picker"] .control-bar--mode {
 .toast.is-open {
   opacity: 1;
   transform: none;
-}
-
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.96);
-  }
 }
 
 
@@ -1015,14 +1463,15 @@ input:focus-visible {
 
 .tools__anchor:focus-visible,
 .tools__row .tool-button:focus-visible,
-.mode-bar .tool-button:focus-visible {
+.tools-drop .tool-button:focus-visible {
   outline-offset: -2px;
 }
 
 /* no backdrop filtering: use an opaque surface */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .glass,
-  .panel {
+  .panel,
+  .tools-shape__glass {
     background: var(--glass-fill-solid);
   }
 }
@@ -1030,7 +1479,8 @@ input:focus-visible {
 /* users who prefer reduced transparency */
 @media (prefers-reduced-transparency: reduce) {
   .glass,
-  .panel {
+  .panel,
+  .tools-shape__glass {
     background: var(--glass-fill-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -1047,6 +1497,10 @@ input:focus-visible {
   }
 
   .tools__row .tool-button,
+  .tools-drop .tool-button,
+  .object-menu,
+  .branches,
+  .caption,
   .canvas-panel,
   .toast,
   .picker {
@@ -1057,9 +1511,6 @@ input:focus-visible {
     opacity: 0;
   }
 
-  .mode-bar {
-    animation: none;
-  }
 }
 
 /* windows high contrast / forced colors */
@@ -1071,5 +1522,10 @@ input:focus-visible {
 
   .timeline__track {
     background: ButtonText;
+  }
+
+  .tools-shape__edge path {
+    stroke: ButtonText;
+    stroke-width: 1;
   }
 }

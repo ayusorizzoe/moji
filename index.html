@@ -12,6 +12,7 @@
 
   <link rel="stylesheet" href="css/styles.css">
   <script src="js/emoji-data.js" defer></script>
+  <script src="js/history.js" defer></script>
   <script src="js/main.js" defer></script>
 </head>
 <body data-mode="idle">
@@ -32,7 +33,7 @@
 
     <div class="control-bar control-bar--settings">
       <button class="glass control-button control-button--settings" type="button"
-              aria-label="settings" aria-disabled="true">
+              data-name="settings" aria-label="settings" aria-disabled="true">
         <span class="emoji-icon" aria-hidden="true">⚙️</span>
         <svg class="icon icon--chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <polyline points="10 7 15 12 10 17"/>
@@ -41,24 +42,44 @@
     </div>
 
     <div class="control-bar control-bar--tools">
-      <div class="glass tools" data-expanded="false">
+      <!-- one continuous glass outline for the panel and its drop-down tab,
+           redrawn by js as it morphs -->
+      <div class="tools-shape" aria-hidden="true">
+        <svg class="tools-shape__shadow" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <filter id="tools-shadow-soft" x="-30%" y="-40%" width="160%" height="200%">
+              <feGaussianBlur stdDeviation="9"/>
+            </filter>
+            <filter id="tools-shadow-tight" x="-10%" y="-10%" width="120%" height="140%">
+              <feGaussianBlur stdDeviation="0.8"/>
+            </filter>
+          </defs>
+          <path class="tools-shape__shadow-soft" filter="url(#tools-shadow-soft)" transform="translate(0 6)"/>
+          <path class="tools-shape__shadow-tight" filter="url(#tools-shadow-tight)" transform="translate(0 0.75)"/>
+        </svg>
+        <div class="tools-shape__glass"></div>
+        <svg class="tools-shape__edge" xmlns="http://www.w3.org/2000/svg">
+          <path/>
+        </svg>
+      </div>
+      <div class="tools" data-expanded="false">
         <div class="tools__row" id="tools-row" inert>
-          <button class="tool-button" type="button" data-tool="add" aria-label="add emoji" style="--i: 5">
+          <button class="tool-button" type="button" data-tool="add" data-name="add" aria-label="add emoji" aria-pressed="false" style="--i: 5">
             <span class="emoji-icon" aria-hidden="true">➕</span>
           </button>
-          <button class="tool-button" type="button" data-tool="delete" aria-label="delete mode" aria-pressed="false" style="--i: 4">
+          <button class="tool-button" type="button" data-tool="delete" data-name="delete" aria-label="delete mode" aria-pressed="false" style="--i: 4">
             <span class="emoji-icon" aria-hidden="true">➖</span>
           </button>
-          <button class="tool-button" type="button" data-tool="undo" aria-label="undo" aria-disabled="true" style="--i: 3">
+          <button class="tool-button" type="button" data-tool="undo" data-name="undo" aria-label="undo" aria-disabled="true" style="--i: 3">
             <span class="emoji-icon" aria-hidden="true">↩️</span>
           </button>
-          <button class="tool-button" type="button" data-tool="redo" aria-label="redo" aria-disabled="true" style="--i: 2">
+          <button class="tool-button" type="button" data-tool="redo" data-name="redo" aria-label="redo" aria-disabled="true" style="--i: 2">
             <span class="emoji-icon" aria-hidden="true">↪️</span>
           </button>
-          <button class="tool-button" type="button" data-tool="recenter" aria-label="recenter canvas" style="--i: 1">
+          <button class="tool-button" type="button" data-tool="recenter" data-name="recenter" aria-label="recenter canvas" style="--i: 1">
             <span class="emoji-icon" aria-hidden="true">🎯</span>
           </button>
-          <button class="tool-button" type="button" data-tool="export" aria-label="export png" style="--i: 0">
+          <button class="tool-button" type="button" data-tool="export" data-name="export" aria-label="export png" style="--i: 0">
             <span class="emoji-icon" aria-hidden="true">✅</span>
           </button>
         </div>
@@ -70,27 +91,52 @@
           <span class="emoji-icon" aria-hidden="true">🛠️</span>
         </button>
       </div>
-    </div>
-
-    <div class="control-bar control-bar--timeline">
-      <button class="glass timeline" type="button"
-              aria-label="editing history timeline" aria-disabled="true">
-        <span class="emoji-icon" aria-hidden="true">⏳</span>
-        <span class="timeline__track" aria-hidden="true"></span>
-      </button>
-    </div>
-
-    <!-- mode bar: visible only while placing or deleting -->
-    <div class="control-bar control-bar--mode" hidden>
-      <div class="glass mode-bar">
-        <button class="tool-button mode-bar__add" type="button" data-action="reopen-picker" aria-label="choose another emoji">
-          <span class="emoji-icon" aria-hidden="true">➕</span>
-        </button>
-        <button class="tool-button" type="button" data-action="exit-mode" aria-label="exit placement mode">
-          <span class="emoji-icon" aria-hidden="true">✖️</span>
+      <!-- the button inside the drop-down tab under ➕ (placing) or ➖ (deleting) -->
+      <div class="tools-drop" hidden>
+        <button class="tool-button tools-drop__button" type="button" data-action="drop">
+          <span class="emoji-icon" aria-hidden="true"></span>
         </button>
       </div>
     </div>
+
+    <!-- timeline: ⏳ opens the history of the active branch -->
+    <div class="control-bar control-bar--timeline">
+      <div class="glass timeline" data-open="false">
+        <span class="timeline__track" aria-hidden="true"></span>
+        <div class="timeline__panel" id="timeline-panel">
+          <p class="timeline__status" aria-live="polite"></p>
+          <div class="timeline__scrubber" role="slider" tabindex="0" aria-label="history position"
+               aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+            <canvas class="timeline__ticks" aria-hidden="true"></canvas>
+            <div class="timeline__fill" aria-hidden="true"></div>
+            <div class="timeline__knob" aria-hidden="true"></div>
+          </div>
+          <div class="timeline__controls">
+            <button class="tool-button" type="button" data-timeline="play" data-name="play" aria-label="play">
+              <span class="emoji-icon" aria-hidden="true">▶️</span>
+            </button>
+            <button class="timeline__speed" type="button" data-timeline="speed" data-name="playback speed"
+                    aria-label="playback speed">1×</button>
+            <span class="timeline__spacer"></span>
+            <button class="tool-button" type="button" data-timeline="branch" data-name="start from here"
+                    aria-label="start a branch from here" hidden>
+              <span class="emoji-icon" aria-hidden="true">🌱</span>
+            </button>
+            <button class="tool-button" type="button" data-timeline="branches" data-name="view branches"
+                    aria-label="view branches">
+              <span class="emoji-icon" aria-hidden="true">🌿</span>
+            </button>
+          </div>
+        </div>
+        <button class="timeline__toggle" type="button" data-name="timeline" aria-label="timeline"
+                aria-expanded="false" aria-controls="timeline-panel">
+          <span class="emoji-icon" aria-hidden="true">⏳</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- caption: briefly names the button that was tapped, next to it -->
+    <p class="glass caption" aria-hidden="true" hidden></p>
 
     <!-- transient status message (export or autosave problems only) -->
     <div class="control-bar control-bar--toast">
@@ -98,6 +144,30 @@
     </div>
 
   </div>
+
+  <!-- object menu: actions for the selected emoji (opens by tapping the selection while editing) -->
+  <div class="glass panel object-menu" role="menu" aria-label="emoji actions" hidden>
+    <div class="object-menu__row">
+      <button class="menu-button" type="button" role="menuitem" data-menu="duplicate" data-name="duplicate">duplicate</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="group" data-name="group">group</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="ungroup" data-name="ungroup">ungroup</button>
+    </div>
+    <div class="object-menu__row">
+      <button class="menu-button" type="button" role="menuitem" data-menu="front" data-name="bring to front">to front</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="forward" data-name="bring forward">forward</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="backward" data-name="send backward">backward</button>
+      <button class="menu-button" type="button" role="menuitem" data-menu="back" data-name="send to back">to back</button>
+    </div>
+  </div>
+
+  <!-- branches: switch, rename, delete (from 🌿 in the timeline) -->
+  <section class="glass panel branches" aria-label="branches" hidden>
+    <header class="branches__header">
+      <h2 class="branches__title">branches</h2>
+      <span class="branches__count"></span>
+    </header>
+    <ul class="branches__list"></ul>
+  </section>
 
   <!-- canvas properties -->
   <div class="glass panel canvas-panel" id="canvas-panel" role="dialog" aria-label="canvas properties" hidden>
