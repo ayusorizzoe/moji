@@ -11,14 +11,14 @@ open `index.html` in a browser, or serve the folder locally, for example:
 python3 -m http.server
 ```
 
-## current features (0.0.3, in progress)
+## current features (0.0.4, in progress)
 
 - a 9:16 black canvas on a gray grid workspace. on phones the canvas fills the screen; pinch to zoom out and see all of it.
 - touch: pinch to zoom, two fingers to pan, one finger to tap.
 - desktop: drag to pan; scroll wheel, trackpad scrolling, or trackpad pinch to zoom around the pointer.
-- tap the `canvas` label (a round button beside ⚙️ while the canvas fills the screen, a label just above the canvas once zoomed out) to change the aspect ratio, set a custom size, or pick a background color (simple swatches, or the color wheel for any color). resizing never moves or scales emoji.
+- tap the `canvas` label (a round button in the top-left corner while the canvas fills the screen; a label just above the canvas once zoomed out) to change the aspect ratio, set a custom size, or pick a background color (simple swatches, or the color wheel for any color). resizing never moves or scales emoji.
 - 🛠️ opens the tools: ➕ add, ➖ delete, ↩️ undo, ↪️ redo, 🗂️ layers, 🎯 recenter, ✅ export.
-- ➕ opens the emoji picker (search and categories). pick an emoji, then tap to place copies. while placing, the emoji hangs in a tab under ➕: tap it to change emoji, or tap ➕ again to stop.
+- ➕ opens the emoji picker (search and categories). pick an emoji, then tap the canvas to place it: ➕ turns off and the new emoji is selected, ready to move, resize or rotate. tap ➕ again to place another of the same emoji; while placing, it hangs in a tab under ➕: tap the tab to choose a different emoji, or tap ➕ to cancel.
 - ➖ enters delete mode: tap an emoji to remove it. 🧹 in the tab under ➖ deletes every emoji at once (↩️ brings them back). tap ➖ again to stop.
 - tapping any button briefly shows its name right next to it.
 - 🎯 brings the whole canvas back into view.
@@ -28,9 +28,11 @@ python3 -m http.server
 ### editing your artwork
 
 - tap an emoji to select it (nothing moves). tap the same spot again to reach emoji underneath. tap empty space to deselect. on touch screens a white outline follows the emoji's shape; with a mouse it gets a box.
-- drag a selected emoji to move it right away. press and hold an unselected emoji to start editing it (the outline turns blue), then drag to move it. while editing, drag again any time; use two fingers on it to resize and rotate, or with a mouse drag the corner handle to resize and the top handle to rotate. the controls fade away while you move things.
+- once an emoji is selected you can edit it right away: drag it to move it, put two fingers on it to resize and rotate, or with a mouse drag the corner handle to resize and the top handle to rotate. on touch screens the outline turns blue while you move it and back to white when you let go. the controls fade away while you move things.
 - select several: shift-click on desktop; on touch, rest one finger on empty space and tap emoji with another finger.
-- while editing, tap the selection for its menu: duplicate, group, ungroup, to front, forward, backward, to back.
+- tap the selected emoji again for its menu: duplicate, group, ungroup, to front, forward, backward, to back. tap it once more to close it. where emoji overlap, taps there step through them instead; tap a part of the selected emoji that nothing covers for the menu.
+
+- desktop shortcuts: ⌘C / ctrl+c copies the selection, ⌘V / ctrl+v pastes it (each paste lands a step further away), ⌘D / ctrl+d duplicates it.
 
 ### layers
 
@@ -46,10 +48,10 @@ python3 -m http.server
 - in the open timeline, drag the playhead to see any earlier moment (your current artwork is not changed), or press ▶️ to watch it being made, mistakes and corrections included. the speed button switches between 0.5×, 1×, 2× and 4×.
 - 🌱 start from here (shown while looking at an earlier moment) starts a new branch from that moment; your original history is kept.
 - 🌿 lists branches to switch between, rename, or delete. a project can have up to five branches.
-- reset erases every step and branch and keeps the current artwork as the new start (tap it twice; it cannot be undone). to start blank, delete all with 🧹 first, then reset.
+- reset starts over completely: every emoji, step and branch is erased and the canvas returns to the default 9:16 black (tap it twice; it cannot be undone).
 - tap ⏳ again, or tap anywhere outside the timeline, to close; you return to the latest state of the current branch.
 
-⚙️ settings is a placeholder and not yet functional.
+🤔 (top left) opens a short guide to everything above.
 
 ## saving
 

@@ -428,12 +428,54 @@
       if (afterIds.has(o.id)) return;
       entries.splice(Math.min(i, entries.length), 0, { kind: 'out', object: o });
     });
+    addPivots(entries);
     const canvasChanged = before.canvas.width !== after.canvas.width ||
       before.canvas.height !== after.canvas.height ||
       before.canvas.background !== after.canvas.background;
     const visible = canvasChanged || entries.some((e) => e.kind !== 'same') ||
       before.objects.some((o, i) => after.objects[i] !== o);
     return { entries, from: before.canvas, to: after.canvas, canvasChanged, visible };
+  }
+
+  // emoji rotated or resized together (a group or a multiple selection) all
+  // turn around one shared point, so in playback each should swing along
+  // its arc around that point, not slide in a straight line. every such
+  // change is one similarity: after = a·before + t, with a = scale·rotation.
+  // its fixed point q = (i − a)⁻¹·t is the pivot they turned around; a move
+  // keeps the same arc when animated as q + a(e)·(before − q). a single emoji
+  // turns in place and keeps its straight path.
+  function addPivots(entries) {
+    const clusters = new Map();
+    entries.forEach((entry) => {
+      if (entry.kind !== 'move') return;
+      const f = entry.from;
+      const o = entry.object;
+      const angle = o.rotation - f.rotation;
+      const scale = f.size > 0 ? o.size / f.size : 1;
+      if (Math.abs(angle) < 1e-9 && Math.abs(scale - 1) < 1e-9) return; // a plain move
+      const key = angle.toFixed(6) + '|' + scale.toFixed(6);
+      if (!clusters.has(key)) clusters.set(key, { angle, scale, members: [] });
+      clusters.get(key).members.push(entry);
+    });
+    clusters.forEach(({ angle, scale, members }) => {
+      if (members.length < 2) return;
+      const ac = scale * Math.cos(angle);
+      const as = scale * Math.sin(angle);
+      // i − a = [[1 − ac, as], [−as, 1 − ac]]
+      const det = (1 - ac) * (1 - ac) + as * as;
+      if (det < 1e-12) return; // no turn and no scale: nothing to pivot on
+      let qx = 0;
+      let qy = 0;
+      members.forEach(({ from: f, object: o }) => {
+        const tx = o.x - (ac * f.x - as * f.y);
+        const ty = o.y - (as * f.x + ac * f.y);
+        qx += ((1 - ac) * tx - as * ty) / det;
+        qy += (as * tx + (1 - ac) * ty) / det;
+      });
+      qx /= members.length;
+      qy /= members.length;
+      members.forEach((entry) => { entry.pivot = { x: qx, y: qy, angle, scale }; });
+    });
   }
 
   // blends two '#rrggbb' colors (t = 0 → a, 1 → b)
@@ -462,6 +504,21 @@
       if (entry.kind === 'in') return { ...o, alpha: e, size: o.size * (0.55 + 0.45 * e) };
       if (entry.kind === 'out') return { ...o, alpha: 1 - e, size: o.size * (1 - 0.25 * e) };
       const f = entry.from;
+      const pivot = entry.pivot;
+      if (pivot) {
+        // swing around the shared pivot (ends exactly where the edit did)
+        const k = 1 + (pivot.scale - 1) * e;
+        const a = pivot.angle * e;
+        const dx = f.x - pivot.x;
+        const dy = f.y - pivot.y;
+        return {
+          ...o,
+          x: pivot.x + k * (dx * Math.cos(a) - dy * Math.sin(a)),
+          y: pivot.y + k * (dx * Math.sin(a) + dy * Math.cos(a)),
+          size: f.size * k,
+          rotation: f.rotation + a,
+        };
+      }
       return {
         ...o,
         x: f.x + (o.x - f.x) * e,

@@ -255,7 +255,7 @@
 
   // the bottom of the top-row controls (layout offsets, unaffected by animations)
   function topControlsBottom() {
-    return Math.max(dom.settingsBar.offsetTop + dom.settingsBar.offsetHeight,
+    return Math.max(dom.cornerBar.offsetTop + dom.cornerBar.offsetHeight,
       dom.toolsBar.offsetTop + dom.toolsBar.offsetHeight);
   }
 
@@ -274,13 +274,13 @@
     }
 
     // layout offsets (not bounding rects) so control animations never affect the fit
-    const settings = dom.settingsBar;
+    const corner = dom.cornerBar; // the upper-left corner control
     const tools = dom.toolsBar;
     const labelSpace = labelFullHeight + 6;
 
-    const left = settings.offsetLeft;
+    const left = corner.offsetLeft;
     const right = tools.offsetLeft + tools.offsetWidth;
-    const top = Math.max(settings.offsetTop + settings.offsetHeight,
+    const top = Math.max(corner.offsetTop + corner.offsetHeight,
       tools.offsetTop + tools.offsetHeight) + 8 + labelSpace;
     const bottom = dom.timelineBar.offsetTop - 12;
 
@@ -627,7 +627,7 @@
 
   function positionCanvasLabel(rect) {
     // outside, just above the canvas, when there is room below the top
-    // controls; otherwise a round button beside ⚙️
+    // controls; otherwise a round button in ⚙️'s place (⚙️ steps aside)
     const label = dom.canvasLabel;
     const morphing = label.classList.contains('is-morphing');
     if (!labelState.inside && !morphing && label.offsetHeight) labelFullHeight = label.offsetHeight;
@@ -638,7 +638,11 @@
       if (labelState.inside === null) {
         // first layout: take its place without animating
         label.style.transition = 'none';
-        requestAnimationFrame(() => requestAnimationFrame(() => { label.style.transition = ''; }));
+        dom.cornerBar.style.transition = 'none'; // 🤔 too: no slide on page load
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          label.style.transition = '';
+          dom.cornerBar.style.transition = '';
+        }));
       } else if (!reducedMotion.matches) {
         label.classList.add('is-morphing');
         clearTimeout(labelMorphTimer);
@@ -646,10 +650,13 @@
       }
       labelState.inside = inside;
       label.dataset.inside = String(inside);
+      // the round canvas button takes ⚙️'s place; ⚙️ returns with the label
+      document.body.dataset.canvasButton = String(inside);
+      updateToolsCover(); // 🤔 moved, so the tools may now reach it
     }
 
     // explicit widths so the capsule and the circle morph into each other
-    const size = dom.settingsBar.offsetHeight;
+    const size = dom.cornerBar.offsetHeight;
     const width = inside ? size + 'px' : (dom.canvasLabelText.offsetWidth + 24) + 'px';
     if (labelState.width !== width) {
       labelState.width = width;
@@ -674,8 +681,8 @@
     let x;
     let y;
     if (inside) {
-      x = dom.settingsBar.offsetLeft + dom.settingsBar.offsetWidth + 8;
-      y = dom.settingsBar.offsetTop;
+      x = dom.cornerBar.offsetLeft;
+      y = dom.cornerBar.offsetTop;
     } else {
       // stays on screen when the canvas's left edge is panned away
       x = Math.round(Math.max(rect.x, Math.min(8, rect.x + rect.w - parseFloat(width))));
@@ -703,6 +710,7 @@
   function placeEmoji(emoji, worldX, worldY) {
     const object = createEmojiObject(emoji, worldX, worldY);
     commit({ type: 'add-objects', label: 'add', objects: [object], indices: [doc.objects.length] });
+    return object;
   }
 
   // hidden and locked objects are out of reach of ordinary canvas taps,
@@ -848,7 +856,9 @@
 
   function setSelection(ids, options = {}) {
     selection.ids = new Set(ids);
-    selection.editing = Boolean(options.editing) && selection.ids.size > 0;
+    // every selection is fully editable (move, resize, rotate, menu); the
+    // options argument is kept for older callers
+    selection.editing = selection.ids.size > 0;
     selection.frame = computeFrame();
     closeObjectMenu();
     requestRender();
@@ -1003,7 +1013,8 @@
   const outlineMask = document.createElement('canvas');
 
   function drawShapeOutlines(ctx) {
-    const color = selection.editing ? 'rgba(0, 113, 227, 1)' : '#FFFFFF';
+    // white while selected, blue only while it is being moved, resized or rotated
+    const color = transform ? 'rgba(0, 113, 227, 1)' : '#FFFFFF';
     selectedObjects().forEach((object) => {
       const sx = object.x * view.scale + view.tx;
       const sy = object.y * view.scale + view.ty;
@@ -1227,6 +1238,44 @@
     commit({ type: 'reorder', label: action, from: doc.objects.map((o) => o.id), to });
   }
 
+  // copy and paste (desktop shortcuts). the clipboard is moji's own and
+  // lives only in this page: it holds the copied emoji as they were when
+  // copied. each paste adds a fresh copy (new ids, new groups) on top of the
+  // stack, a step further from the original each time, and selects it.
+  let clipboard = null;
+
+  function copySelection() {
+    const objects = selectedObjects();
+    if (objects.length === 0 || !selection.frame) return false;
+    const f = selection.frame;
+    clipboard = {
+      objects,
+      offset: Math.min(160, Math.max(16, Math.min(f.w, f.h) * 0.18)),
+      pastes: 0,
+    };
+    return true;
+  }
+
+  function pasteClipboard() {
+    if (!clipboard || clipboard.objects.length === 0) return false;
+    if (mode !== 'idle') setMode('idle');
+    clipboard.pastes += 1;
+    const shift = clipboard.offset * clipboard.pastes;
+    const groupIds = new Map();
+    const copies = clipboard.objects.map((o) => {
+      const copy = { ...o, id: createId('obj'), x: o.x + shift, y: o.y + shift, order: nextOrder++, createdAt: Date.now() };
+      if (o.groupId) {
+        if (!groupIds.has(o.groupId)) groupIds.set(o.groupId, createId('group'));
+        copy.groupId = groupIds.get(o.groupId);
+      }
+      return copy;
+    });
+    const start = doc.objects.length;
+    commit({ type: 'add-objects', label: 'paste', objects: copies, indices: copies.map((c, k) => start + k) });
+    setSelection(copies.map((c) => c.id));
+    return true;
+  }
+
   function duplicateSelection() {
     const objects = selectedObjects();
     if (objects.length === 0 || !selection.frame) return;
@@ -1391,10 +1440,10 @@
     if (emojiNames.size === 0) {
       EMOJI_CATEGORIES.forEach((category) => category.items.forEach(([e, name]) => {
         emojiNames.set(e, name);
-        emojiNames.set(e.replace(/️/g, ''), name);
+        emojiNames.set(e.replace(/\uFE0F/g, ''), name);
       }));
     }
-    return emojiNames.get(emoji) || emojiNames.get(emoji.replace(/️/g, '')) || emoji;
+    return emojiNames.get(emoji) || emojiNames.get(emoji.replace(/\uFE0F/g, '')) || 'emoji';
   }
 
   const ICONS = {
@@ -1889,6 +1938,7 @@
 
   let mode = 'idle';
   let material = null;
+  let lastMaterial = null; // ➕ remembers the last emoji chosen (this session)
 
   // 🧹 is dimmed when there is nothing to delete
   function updateClearButton() {
@@ -1915,6 +1965,7 @@
     const wasPlacing = mode === 'place';
     mode = 'place';
     material = emoji;
+    lastMaterial = emoji;
     if (wasPlacing) updateDrop(false);
     else setMode('place');
   }
@@ -2168,6 +2219,9 @@
     if (closing === 'picker') {
       hideAnimated(dom.picker);
       dom.pickerSearch.blur();
+    } else if (closing === 'help') {
+      hideAnimated(dom.help);
+      dom.helpButton.setAttribute('aria-expanded', 'false');
     } else if (closing === 'canvas') {
       hideAnimated(dom.canvasPanel);
       dom.canvasLabel.setAttribute('aria-expanded', 'false');
@@ -2191,15 +2245,18 @@
     updateToolsCover();
   }
 
-  // on narrow screens the expanded tools reach the settings corner; settings
+  // on narrow screens the expanded tools reach the upper-left corner; 🤔
   // then fades aside (it never moves) until the tools collapse again
   function updateToolsCover() {
     let cover = false;
     if (dom.tools.dataset.expanded === 'true') {
       const toolsRight = dom.toolsBar.getBoundingClientRect().right;
       const expandedWidth = dom.toolsAnchor.offsetWidth + dom.toolsRow.offsetWidth;
-      const settingsRight = dom.settingsBar.getBoundingClientRect().right;
-      cover = toolsRight - expandedWidth < settingsRight + 8;
+      // 🤔 sits in the corner, or beside the round canvas button
+      const corner = dom.cornerBar;
+      const cornerRight = corner.offsetLeft + corner.offsetWidth +
+        (document.body.dataset.canvasButton === 'true' ? corner.offsetHeight + 8 : 0);
+      cover = toolsRight - expandedWidth < cornerRight + 8;
     }
     document.body.dataset.toolsCover = String(cover);
   }
@@ -2225,7 +2282,10 @@
 
     switch (tool) {
       case 'add':
+        // the remembered emoji is ready at once; its tab under ➕ opens the
+        // picker to change it
         if (mode === 'place') setMode('idle');
+        else if (lastMaterial) selectMaterial(lastMaterial);
         else openPicker();
         break;
       case 'delete':
@@ -2256,6 +2316,21 @@
 
   /* 11. canvas properties
      ======================================================================== */
+
+  // 🤔 help: a short guide; opening and closing it changes nothing else
+  // (the selection and the artwork stay as they are)
+  function toggleHelp() {
+    if (openPanel === 'help') {
+      closePanel();
+      return;
+    }
+    closePanel();
+    closeObjectMenu();
+    setOpenPanel('help');
+    dom.helpButton.setAttribute('aria-expanded', 'true');
+    dom.helpBody.scrollTop = 0;
+    showAnimated(dom.help);
+  }
 
   function openCanvasPanel() {
     if (openPanel === 'canvas') {
@@ -2727,14 +2802,15 @@
         beginHandleGesture(handle, p);
         return;
       }
-      if (onSelection) {
-        gesture.kind = 'on-selection';
-        return;
-      }
+      // an emoji under the finger decides first, so taps on overlapping
+      // emoji still cycle; empty space inside a multiple selection's
+      // outline still grabs the whole selection
       gesture.hits = hitTestAll(p.x, p.y);
       if (gesture.hits.length) {
         gesture.kind = 'press-object';
-        startLongPress();
+        if (!gesture.hits.some((o) => selection.ids.has(o.id))) startLongPress();
+      } else if (onSelection) {
+        gesture.kind = 'on-selection';
       } else {
         gesture.kind = 'press-empty';
       }
@@ -2757,8 +2833,9 @@
     }
 
     // two fingers on an active selection transform it
+    const onSelected = gesture.kind === 'press-object' && gesture.hits.some((o) => selection.ids.has(o.id));
     if (pointers.size === 2 && selection.editing &&
-        (['on-selection', 'long-pressed', 'drag'].includes(gesture.kind) ||
+        (onSelected || ['on-selection', 'long-pressed', 'drag'].includes(gesture.kind) ||
          (gesture.kind !== 'navigate' && pointInFrame(pointerPair().midX, pointerPair().midY, 40)))) {
       if (!transform) beginTransform();
       else rebaseTransform();
@@ -2966,16 +3043,27 @@
   // placement and delete modes
   function handleModeTap(sx, sy) {
     if (mode === 'place' && material) {
+      // one emoji per placement: placing ends ➕ and selects the new emoji,
+      // ready to move, resize, rotate or open its menu (selection is not a
+      // history step; the placement is one)
       const point = screenToWorld(sx, sy);
-      placeEmoji(material, point.x, point.y);
+      const object = placeEmoji(material, point.x, point.y);
+      setMode('idle');
+      setSelection([object.id]);
     } else if (mode === 'delete') {
       const hit = hitTest(sx, sy);
       if (hit) deleteObject(hit);
     }
   }
 
-  // select (never move) the tapped emoji; tapping the same spot again
-  // steps down through everything under it, then back to the top
+  // a tap on an emoji:
+  //   not selected        → select it (top one under the finger)
+  //   selected, and alone under the finger → open or close its menu
+  //   selected, but other emoji overlap here → select the next one down
+  //                         (cycling wins where they overlap; tap a part of
+  //                         the selected emoji that nothing else covers, or
+  //                         empty space inside a multiple selection, for the menu)
+  // nothing ever moves on a tap
   function handleObjectTap(sx, sy, hits, shift) {
     if (shift) {
       toggleUnit(hits[0]);
@@ -2990,17 +3078,24 @@
         units.push(o);
       }
     });
-    const keys = units.map(unitKey);
-    let index = 0;
-    if (lastTap && Math.hypot(sx - lastTap.x, sy - lastTap.y) <= CYCLE_RADIUS &&
-        lastTap.keys.length === keys.length && lastTap.keys.every((k, i) => k === keys[i])) {
-      const current = units[lastTap.index];
-      const ids = unitIds(current);
-      const stillSelected = ids.length === selection.ids.size && ids.every((id) => selection.ids.has(id));
-      if (stillSelected) index = (lastTap.index + 1) % units.length;
+    const isSelection = (o) => {
+      const ids = unitIds(o);
+      return ids.length === selection.ids.size && ids.every((id) => selection.ids.has(id));
+    };
+    const current = units.findIndex(isSelection);
+    const touchesSelection = hits.some((o) => selection.ids.has(o.id));
+
+    if (units.length > 1 && current !== -1) {
+      closeObjectMenu();
+      setSelection(unitIds(units[(current + 1) % units.length]));
+      return;
     }
-    setSelection(unitIds(units[index]));
-    lastTap = { x: sx, y: sy, keys, index };
+    if (touchesSelection && (units.length === 1 || current === -1)) {
+      if (menuOpen) closeObjectMenu();
+      else openObjectMenu();
+      return;
+    }
+    setSelection(unitIds(units[0]));
   }
 
   function onStageWheel(event) {
@@ -3028,7 +3123,33 @@
   /* 15. keyboard and global guards
      ======================================================================== */
 
+  // ⌘/ctrl + c copies the selection, + v pastes it, + d duplicates it.
+  // typing in a field keeps the browser's own copy and paste.
+  function onShortcut(event) {
+    if (!(event.metaKey || event.ctrlKey) || event.altKey) return false;
+    const key = event.key.toLowerCase();
+    if (key !== 'c' && key !== 'v' && key !== 'd') return false;
+    const target = event.target;
+    if (target && target.closest && target.closest('input, textarea, [contenteditable="true"]')) return false;
+    if (timeline.open || layers.drag || transform) return false;
+    if (key === 'd') {
+      event.preventDefault(); // not the browser's bookmark shortcut
+      if (selection.ids.size) {
+        closeObjectMenu();
+        duplicateSelection();
+      }
+      return true;
+    }
+    if (key === 'c') {
+      if (copySelection()) event.preventDefault();
+      return true;
+    }
+    if (pasteClipboard()) event.preventDefault();
+    return true;
+  }
+
   function onKeyDown(event) {
+    if (onShortcut(event)) return;
     if (event.key !== 'Escape') return;
     if (layers.drag) {
       cancelLayerDrag();
@@ -3044,10 +3165,6 @@
     if (closeLayersPanel()) return;
     if (mode !== 'idle') {
       setMode('idle');
-      return;
-    }
-    if (selection.editing) {
-      setSelection(selection.ids);
       return;
     }
     if (selection.ids.size) {
@@ -3338,7 +3455,7 @@
       case 'add-object':
         return 'add';
       case 'add-objects':
-        return op.label === 'duplicate' ? 'duplicate' : 'add';
+        return op.label === 'duplicate' || op.label === 'paste' ? op.label : 'add';
       case 'delete-object':
       case 'delete-objects':
         return op.label === 'delete all' ? 'delete all' : 'delete';
@@ -3376,6 +3493,10 @@
       status = `${branch.name} · ${step} of ${total} · ${describeEvent(timeline.events[step - 1])}`;
     }
     dom.timelineStatus.textContent = timeline.message || status;
+    // messages may take two lines; the usual status stays on one
+    dom.timelineStatus.dataset.message = String(Boolean(timeline.message));
+    // a long branch name or step label wraps instead of being cut off
+    dom.timelineStatus.dataset.long = String(dom.timelineStatus.textContent.length > 34);
 
     const fraction = total ? timeline.position / total : 1;
     dom.timelineFill.style.width = (fraction * 100) + '%';
@@ -3566,14 +3687,14 @@
     }
   }
 
-  // reset: the current artwork becomes the new starting point; every step
-  // and every branch is erased. asks once more before it happens.
+  // reset: starts the whole project over (default canvas, no emoji, no
+  // steps, one branch). asks once more before it happens; cannot be undone.
   function resetTimeline() {
     if (!timeline.resetArmed) {
       timeline.resetArmed = true;
       dom.resetButton.dataset.confirm = 'true';
       dom.resetButton.textContent = 'sure?';
-      showTimelineMessage('tap again to erase all steps and branches. the artwork stays');
+      showTimelineMessage('tap sure? to erase every emoji, step and branch');
       clearTimeout(timeline.resetTimer);
       timeline.resetTimer = setTimeout(disarmReset, 4200);
       return;
@@ -3581,13 +3702,14 @@
     disarmReset();
     stopPlayback(false);
     closeBranches();
-    const canvas = { ...doc.canvas };
-    const objects = doc.objects.slice();
-    project = H.createProject({ canvas, objects });
+    // a fresh project: default canvas, no emoji, no history, one branch
+    project = H.createProject({ canvas: { ...DEFAULT_CANVAS }, objects: [] });
     setLiveState(H.latestState(project, project.activeId));
+    nextOrder = 1;
+    backgroundPreview = null;
     if (timeline.saved) {
-      const existing = new Set(objects.map((o) => o.id));
-      timeline.saved.ids = timeline.saved.ids.filter((id) => existing.has(id));
+      timeline.saved.ids = [];
+      timeline.saved.editing = false;
     }
     refreshTimelineData();
     showStateAt(timeline.total);
@@ -3596,7 +3718,8 @@
     syncCanvasPanel();
     saveNeeded = true;
     saveNow();
-    showTimelineMessage('timeline reset');
+    recenterView();
+    showTimelineMessage('everything reset');
   }
 
   function disarmReset() {
@@ -3621,7 +3744,7 @@
   function startFromHere() {
     if (timeline.index >= timeline.total) return;
     if (!H.canCreateBranch(project)) {
-      showTimelineMessage(`${H.MAX_BRANCHES} branches is the limit. delete one in 🌿 to start another`);
+      showTimelineMessage(`${H.MAX_BRANCHES} branches is the limit. delete one in 🌿 first`);
       return;
     }
     const branch = H.createBranch(project, project.activeId, timeline.index);
@@ -3704,7 +3827,8 @@
         const name = branchButton('switch', branch.name, 'branch-row__name', active ? `${branch.name}, current branch` : `switch to ${branch.name}`);
         const meta = document.createElement('span');
         meta.className = 'branch-row__meta';
-        meta.textContent = active ? 'current' : `${H.chronology(project, branch.id).length} steps`;
+        const count = H.chronology(project, branch.id).length;
+        meta.textContent = active ? 'current' : `${count} ${count === 1 ? 'step' : 'steps'}`;
         const rename = branchButton('rename', '✏️', 'tool-button branch-row__icon', `rename ${branch.name}`);
         rename.dataset.name = 'rename';
         const remove = branchButton('delete', '🗑️', 'tool-button branch-row__icon', `delete ${branch.name}`);
@@ -3734,6 +3858,11 @@
       icon.setAttribute('aria-hidden', 'true');
       icon.textContent = label;
       button.appendChild(icon);
+    } else if (className.includes('branch-row__name')) {
+      const text = document.createElement('span');
+      text.className = 'branch-row__label';
+      text.textContent = label;
+      button.appendChild(text);
     } else {
       button.textContent = label;
     }
@@ -3857,22 +3986,39 @@
     };
     let x;
     let y;
+    // a caption lines up with an edge of the shape it comes from: the
+    // timeline box, the tools panel, the 🤔 button. a button in the
+    // left half of its shape uses the left edge, otherwise the right edge.
+    const alignTo = (shape) => {
+      const centre = box.left + box.width / 2;
+      return centre < shape.left + shape.width / 2 ? shape.left : shape.right - width;
+    };
 
     if (anchor === dom.dropButton) {
       x = tab.right + gap;
       y = tab.top + (tab.height - height) / 2;
+    } else if (dom.timeline.contains(anchor)) {
+      // above the whole timeline, never over its slider
+      const shape = dom.timeline.getBoundingClientRect();
+      x = alignTo(shape);
+      y = shape.top - height - gap;
+    } else if (dom.toolsBar.contains(anchor)) {
+      // under the tools panel, flush with its right edge (where the panel
+      // and the layers panel also line up); below the tab if it is in the way
+      const shape = dom.tools.getBoundingClientRect();
+      x = shape.right - width;
+      y = shape.bottom + gap;
+      if (tabOpen && x < tab.right + gap && x + width > tab.left - gap) y = tab.top + tab.height + gap;
+    } else if (dom.cornerBar.contains(anchor)) {
+      const shape = anchor.getBoundingClientRect();
+      x = shape.left;
+      y = shape.bottom + gap;
     } else if (box.top > viewportHeight / 2) {
       x = box.left + (box.width - width) / 2;
       y = box.top - height - gap;
     } else {
-      const barBottom = dom.toolsBar.contains(anchor)
-        ? dom.tools.getBoundingClientRect().bottom : box.bottom;
       x = box.left + (box.width - width) / 2;
-      y = barBottom + gap;
-      // keep clear of the drop-down tab
-      if (tabOpen && dom.toolsBar.contains(anchor) && x < tab.right + gap && x + width > tab.left - gap) {
-        x = tab.right + gap;
-      }
+      y = box.bottom + gap;
     }
 
     x = Math.min(Math.max(x, margin), viewportWidth - width - margin);
@@ -3908,7 +4054,7 @@
     dom.layersIndicator = $('.layers__indicator');
     dom.layersClose = $('.layers__close');
     dom.canvasLabelText = $('.canvas-label__text');
-    dom.settingsBar = $('.control-bar--settings');
+    dom.cornerBar = $('.control-bar--help');
     dom.toolsBar = $('.control-bar--tools');
     dom.timelineBar = $('.control-bar--timeline');
     dom.tools = $('.tools');
@@ -3925,7 +4071,10 @@
     dom.toolsShapePaths = [...document.querySelectorAll('.tools-shape svg path')];
     dom.dropButton = $('.tools-drop__button');
     dom.caption = $('.caption');
-    dom.settingsButton = $('.control-button--settings');
+    dom.helpButton = $('.control-button--help');
+    dom.help = $('.help');
+    dom.helpClose = $('.help__close');
+    dom.helpBody = $('.help__body');
     dom.timeline = $('.timeline');
     dom.timelineToggle = $('.timeline__toggle');
     dom.timelinePanel = $('.timeline__panel');
@@ -3981,16 +4130,21 @@
 
     // tools drop-down and captions
     dom.dropButton.addEventListener('click', onDropClick);
-    dom.settingsButton.addEventListener('click', () => showCaption(dom.settingsButton.dataset.name, dom.settingsButton));
+    dom.helpButton.addEventListener('click', toggleHelp);
+    dom.helpClose.addEventListener('click', () => closePanel());
 
     // object menu
     dom.objectMenu.addEventListener('click', onObjectMenuClick);
 
     // timeline
     dom.timelineToggle.addEventListener('click', () => {
-      showCaption(dom.timelineToggle.dataset.name, dom.timelineToggle);
       if (timeline.open) closeTimeline();
       else openTimeline();
+      // the caption lines up with the timeline once it has finished opening
+      // or closing (its edges move while it morphs)
+      clearTimeout(captionTimer);
+      captionTimer = setTimeout(() => showCaption(dom.timelineToggle.dataset.name, dom.timelineToggle),
+        reducedMotion.matches ? 0 : PANEL_HIDE_DELAY);
     });
     dom.timelineControls.addEventListener('click', onTimelineControlClick);
     dom.branches.addEventListener('click', onBranchesClick);

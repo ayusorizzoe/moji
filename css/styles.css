@@ -373,27 +373,56 @@ body[data-mode="delete"] .stage {
 }
 
 
-/* 7. settings control (upper left, expands toward the right)
+/* 7. help control (upper left)
    ========================================================================== */
 
-.control-bar--settings {
+.control-bar--help {
   top: calc(var(--safe-top) + var(--edge-offset));
   left: calc(var(--safe-left) + var(--edge-offset));
   transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
 }
 
-.control-button--settings {
-  padding: 0 10px 0 13px;
+.control-button--help {
+  width: var(--control-size);
+  padding: 0;
+  cursor: pointer;
 }
 
-/* on narrow screens the expanded tools need this corner; settings steps aside */
-body[data-tools-cover="true"] .control-bar--settings {
+.control-button--help[aria-expanded="true"] {
+  background: var(--glass-fill-strong);
+}
+
+/* while the canvas fills the screen, the round canvas button takes the
+   corner and 🤔 steps beside it at 75% size, its top edge level with the
+   button's top */
+.control-bar--help {
+  transform-origin: left top;
+}
+
+body[data-canvas-button="true"] .control-bar--help {
+  transform: translateX(calc(var(--control-size) + var(--space-2))) scale(0.75);
+}
+
+/* the smaller 🤔 keeps a touch target of about 44px or more. these insets
+   shrink with the scale, so the left one reaches only into the gap, never
+   over the canvas button */
+.control-button--help {
+  position: relative;
+}
+
+body[data-canvas-button="true"] .control-button--help::after {
+  content: "";
+  position: absolute;
+  inset: -8px -10px -14px -8px;
+}
+
+/* on narrow screens the expanded tools need this corner; 🤔 steps aside */
+body[data-tools-cover="true"] .control-bar--help {
   opacity: 0;
-  transform: scale(0.88);
   pointer-events: none;
 }
 
-body[data-tools-cover="true"] .control-bar--settings > * {
+body[data-tools-cover="true"] .control-bar--help > * {
   pointer-events: none;
 }
 
@@ -626,6 +655,18 @@ body[data-tools-cover="true"] .control-bar--settings > * {
   text-overflow: ellipsis;
 }
 
+/* a message (reset confirmation, branch limit) wraps onto a second line
+   instead of being cut off on narrow phones */
+.timeline__status[data-message="true"],
+.timeline__status[data-long="true"] {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  white-space: normal;
+  font-size: 13px;
+}
+
 .timeline__rail-space {
   height: 32px;
 }
@@ -796,7 +837,7 @@ body[data-transforming="true"] .controls * {
 .layers {
   top: 0;
   right: calc(var(--safe-right, 0px) + var(--edge-offset));
-  width: min(236px, 64vw);
+  width: min(280px, 78vw);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -920,7 +961,7 @@ body[data-transforming="true"] .controls * {
 
 .layer-row__spacer {
   flex: none;
-  width: 20px;
+  width: 8px;
 }
 
 .layer-row__thumb {
@@ -945,14 +986,20 @@ body[data-transforming="true"] .controls * {
 .layer-row__thumb--group span:nth-child(2) { left: 8px; top: 9px; }
 .layer-row__thumb--group span:nth-child(3) { left: 14px; top: 0; }
 
+/* names take up to two lines in a smaller size rather than being cut to a
+   few letters on narrow phones */
 .layer-row__name {
   flex: 1 1 auto;
   min-width: 0;
   padding-left: 6px;
-  font-size: var(--font-size-small);
-  white-space: nowrap;
+  font-size: 12px;
+  line-height: 1.2;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .layer-row[data-hidden="true"] .layer-row__thumb,
@@ -965,7 +1012,7 @@ body[data-transforming="true"] .controls * {
   display: grid;
   place-items: center;
   flex: none;
-  width: 30px;
+  width: 28px;
   height: 36px;
   padding: 0;
   border: 0;
@@ -988,7 +1035,7 @@ body[data-transforming="true"] .controls * {
 }
 
 .layer-row__grip {
-  width: 26px;
+  width: 24px;
   color: var(--color-ink-muted);
   cursor: grab;
   touch-action: none;
@@ -1025,13 +1072,145 @@ body[data-layer-drag="true"] {
   cursor: grabbing;
 }
 
+/* help: a compact, scrollable guide under 🤔 */
+.help {
+  top: calc(var(--safe-top) + var(--edge-offset) + var(--control-size) + var(--space-2));
+  left: calc(var(--safe-left) + var(--edge-offset));
+  width: min(360px, calc(100vw - 2 * var(--edge-offset)));
+  max-height: min(560px, calc(100dvh - var(--control-size) - var(--timeline-height) - 4 * var(--edge-offset) - var(--space-2)));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 22px;
+  opacity: 0;
+  transform: translateY(-6px) scale(0.97);
+  transform-origin: top left;
+  transition: opacity var(--duration-fade) ease, transform var(--duration-morph) var(--ease-spring);
+}
+
+.help.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.help__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 8px 4px 16px;
+}
+
+.help__title {
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.help__body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  padding: 0 16px 14px;
+}
+
+.help__section {
+  padding: 10px 0;
+  border-top: 0.5px solid var(--color-separator);
+}
+
+.help__section:first-child {
+  border-top: 0;
+}
+
+.help__section h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  font-size: var(--font-size-small);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: var(--letter-spacing-label);
+}
+
+.help__section h3 span {
+  font-family: var(--font-family-emoji);
+  font-size: 18px;
+}
+
+.help__section p,
+.help__keys {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--color-ink-muted);
+}
+
+.help__keys {
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.help__keys li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* a tiny picture of tapping an emoji to select it */
+.help__demo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-family-emoji);
+  font-size: 20px;
+}
+
+.help__arrow {
+  font-family: var(--font-family);
+  font-size: 13px;
+  color: var(--color-ink-faint);
+}
+
+.help__selected {
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px #FFFFFF, 0 0 0 3.5px rgba(0, 113, 227, 0.9);
+}
+
+.help__duplicate {
+  position: relative;
+  display: inline-block;
+  width: 20px;
+  height: 18px;
+  font-size: 13px;
+}
+
+.help__duplicate span {
+  position: absolute;
+  line-height: 1;
+}
+
+.help__duplicate span:first-child { left: 0; top: 0; opacity: 0.75; }
+.help__duplicate span:last-child { left: 5px; top: 5px; }
+
+.help kbd {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--color-fill);
+  font-family: var(--font-family-numeric);
+  font-size: 12px;
+  color: var(--color-ink);
+}
+
 /* the branch list rises just above the timeline */
 .branches {
   left: 0;
   right: 0;
   margin: 0 auto;
   bottom: calc(var(--safe-bottom) + var(--edge-offset) + var(--timeline-open-height) + 8px);
-  width: min(420px, calc(100vw - 2 * var(--edge-offset)));
+  /* the same width as the open timeline, so their edges line up */
+  width: min(520px, calc(100vw - 2 * var(--edge-offset)));
   max-height: calc(100dvh - var(--timeline-open-height) - 120px);
   overflow-y: auto;
   padding: 8px;
@@ -1067,6 +1246,7 @@ body[data-layer-drag="true"] {
 
 .branches__list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr); /* long names shorten, rows never overflow */
   gap: 2px;
   margin: 0;
   padding: 0;
@@ -1089,18 +1269,26 @@ body[data-layer-drag="true"] {
 .branch-row__name {
   flex: 1 1 auto;
   min-width: 0;
-  height: 44px;
-  padding: 0 8px;
+  min-height: 44px;
+  padding: 4px 8px;
   border: 0;
   background: transparent;
   text-align: left;
   font-size: var(--font-size-base);
   font-weight: var(--font-weight-bold);
+  line-height: 1.2;
   color: var(--color-ink);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
+}
+
+/* long names take two lines before they shorten */
+.branch-row__label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .branch-row__meta {
@@ -1275,7 +1463,7 @@ body[data-layer-drag="true"] {
 
 /* positioned by js at the canvas's upper-left edge, in screen space. when
    the canvas reaches up behind the top controls there is no room above it,
-   so the label morphs into a round button beside ⚙️ showing a miniature
+   so the label morphs into a round button in ⚙️'s place showing a miniature
    of the canvas (its shape and background color). */
 .canvas-label {
   position: absolute;
@@ -1359,7 +1547,7 @@ body[data-layer-drag="true"] {
   inset: 0;
 }
 
-/* beside ⚙️ it steps aside with ⚙️ when the expanded tools need the corner */
+/* in that corner it steps aside when the expanded tools need it, as ⚙️ does */
 body[data-tools-cover="true"] .canvas-label[data-inside="true"] {
   opacity: 0;
   pointer-events: none;
@@ -1615,6 +1803,7 @@ body[data-tools-cover="true"] .canvas-label[data-inside="true"] {
 /* names the tapped button right next to it, then fades. js sets left/top. */
 .caption {
   position: absolute;
+  z-index: 5; /* in front of every control, the open timeline included */
   top: 0;
   left: 0;
   margin: 0;
@@ -1899,6 +2088,19 @@ body[data-tools-cover="true"] .canvas-label[data-inside="true"] {
   }
 }
 
+/* the narrowest phones (iphone se, 320px) */
+@media (max-width: 359px) {
+  :root {
+    --tool-size: 34px;
+    --tools-anchor-width: 48px;
+    --edge-offset: 10px;
+  }
+
+  .tools .emoji-icon {
+    font-size: 20px;
+  }
+}
+
 @media (min-width: 600px) {
   :root {
     --edge-offset: var(--space-4);
@@ -1982,6 +2184,7 @@ input:focus-visible {
   .tools-drop .tool-button,
   .object-menu,
   .layers,
+  .help,
   .branches,
   .caption,
   .canvas-panel,

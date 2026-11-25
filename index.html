@@ -32,7 +32,7 @@
   <!-- floating controls -->
   <div class="controls">
 
-    <!-- canvas label: follows the canvas; becomes a round button beside ⚙️
+    <!-- canvas label: follows the canvas; becomes a round button in ⚙️'s place
          while the canvas fills the top of the screen -->
     <button class="glass canvas-label" type="button" aria-label="canvas" aria-haspopup="dialog"
             aria-expanded="false" aria-controls="canvas-panel">
@@ -40,13 +40,13 @@
       <span class="canvas-label__icon" aria-hidden="true"></span>
     </button>
 
-    <div class="control-bar control-bar--settings">
-      <button class="glass control-button control-button--settings" type="button"
-              data-name="settings" aria-label="settings" aria-disabled="true">
-        <span class="emoji-icon" aria-hidden="true">⚙️</span>
-        <svg class="icon icon--chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <polyline points="10 7 15 12 10 17"/>
-        </svg>
+    <!-- 🤔 help: upper-left corner; steps beside the round canvas button
+         while the canvas fills the screen -->
+    <div class="control-bar control-bar--help">
+      <button class="glass control-button control-button--help" type="button"
+              data-name="help" aria-label="help" aria-haspopup="dialog"
+              aria-expanded="false" aria-controls="help">
+        <span class="emoji-icon" aria-hidden="true">🤔</span>
       </button>
     </div>
 
@@ -134,7 +134,7 @@
               <span class="emoji-icon" aria-hidden="true">🌿</span>
             </button>
             <button class="timeline__speed timeline__reset" type="button" data-timeline="reset"
-                    data-name="reset timeline" aria-label="reset timeline">reset</button>
+                    data-name="reset everything" aria-label="reset everything">reset</button>
           </div>
         </div>
         <div class="timeline__scrubber" role="slider" tabindex="0" aria-label="history position"
@@ -222,6 +222,73 @@
       <span class="branches__count"></span>
     </header>
     <ul class="branches__list"></ul>
+  </section>
+
+  <!-- help: a short guide to moji (opens from 🤔; changes nothing) -->
+  <section class="glass panel help" id="help" role="dialog" aria-labelledby="help-title" hidden>
+    <header class="help__header">
+      <h2 class="help__title" id="help-title">how moji works</h2>
+      <button class="layers__close help__close" type="button" aria-label="close help">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <line x1="7" y1="7" x2="17" y2="17"/><line x1="17" y1="7" x2="7" y2="17"/>
+        </svg>
+      </button>
+    </header>
+    <div class="help__body">
+      <section class="help__section">
+        <h3><span aria-hidden="true">➕</span> add</h3>
+        <p>open 🛠️, tap ➕, pick an emoji, then tap the canvas. the new emoji is selected and ready to edit.</p>
+        <p>tap ➕ again for another of the same. tap the emoji in the tab under ➕ to pick a different one.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">👆</span> select</h3>
+        <p class="help__demo" aria-hidden="true"><span>👆</span><span>🙂</span><span class="help__arrow">→</span><span class="help__selected">🙂</span></p>
+        <p>tap an emoji to select it. tap empty space to deselect.</p>
+        <p>where emoji overlap, tap the same spot again to reach the one underneath.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">✋</span> move, resize, rotate</h3>
+        <p>drag a selected emoji to move it. put two fingers on it and pinch or turn to resize and rotate.</p>
+        <p>with a mouse: drag the corner dot to resize, the top dot to rotate.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">👥</span> several at once</h3>
+        <p>rest one finger on empty space and tap other emoji with another finger. with a mouse, shift-click.</p>
+        <p>then tap the selection for 🫂 group; grouped emoji move together. ✂️ ungroup splits them again.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">💬</span> actions</h3>
+        <p>tap a selected emoji again for its menu:</p>
+        <ul class="help__keys">
+          <li><span class="help__duplicate" aria-hidden="true"><span>🟦</span><span>🟦</span></span> duplicate</li>
+          <li><span aria-hidden="true">⏫</span> to front · <span aria-hidden="true">🔼</span> forward</li>
+          <li><span aria-hidden="true">🔽</span> backward · <span aria-hidden="true">⏬</span> to back</li>
+        </ul>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">🗂️</span> layers</h3>
+        <p>everything you placed, front to back. tap a row to select it.</p>
+        <p>the eye hides an emoji; the lock keeps it from being moved by accident. drag ≡ to restack, or into and out of groups.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">🖐️</span> canvas</h3>
+        <p>pinch to zoom and drag with two fingers to look around. with a mouse, scroll to zoom and drag to pan. 🎯 brings the canvas back.</p>
+        <p>tap the canvas label (or its small icon in the corner) for size, shape and background color.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">⏳</span> history</h3>
+        <p>↩️ undo and ↪️ redo. the strip at the bottom fills up as you work: drag it to look back, ▶️ to replay.</p>
+        <p>🌱 starts a new version from an earlier moment; 🌿 lists them. reset starts over.</p>
+      </section>
+      <section class="help__section">
+        <h3><span aria-hidden="true">✅</span> export</h3>
+        <p>✅ in 🛠️ saves a png of the canvas. anything outside the canvas is left out.</p>
+      </section>
+      <section class="help__section help__section--keys">
+        <h3><span aria-hidden="true">⌨️</span> keyboard</h3>
+        <p><kbd>⌘C</kbd> copy · <kbd>⌘V</kbd> paste · <kbd>⌘D</kbd> duplicate · <kbd>esc</kbd> deselect (ctrl on windows)</p>
+      </section>
+    </div>
   </section>
 
   <!-- canvas properties -->
